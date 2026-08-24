@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "m365": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Microsoft 365 Copilot (local proxy)",
+      "options": {
+        "baseURL": "http://localhost:8080/v1",
+        "apiKey": "not-needed-proxy-handles-auth"
+      },
+      "models": {
+        "m365-copilot": {
+          "name": "Microsoft 365 Copilot",
+          "limit": { "context": 128000, "output": 8192 },
+          "tool_call": false
+        }
+      }
+    }
+  },
+  "model": "m365/m365-copilot"
+}

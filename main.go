@@ -154,7 +154,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	toolInstr := func(fresh bool) graphContext {
 		text := toolProtocol + renderToolCatalog(req.Tools)
 		if !fresh {
-			text = renderToolReminder(req.Tools, root)
+			text = renderToolReminder(req.Tools, root, lastUserMessage(turns))
 		}
 		return graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text}
 	}

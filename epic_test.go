@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,8 +43,11 @@ func TestExtractWithRepairAndValidation(t *testing.T) {
 	if repaired != 1 {
 		t.Errorf("repaired=%d", repaired)
 	}
-	if len(problems) != 3 || !strings.Contains(problems[0], `missing required argument "content"`) || !strings.Contains(problems[1], `missing required argument "path"`) || !strings.Contains(problems[2], `unknown argument "filepath"`) {
-		t.Errorf("problems: %v", problems)
+	joined := strings.Join(problems, "\n")
+	for _, want := range []string{`edit: missing required argument "content"`, `read: missing required argument "path"`, `read: unknown argument "filepath"`, `edit: exact schema:`, `read: exact schema:`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("problems missing %q: %v", want, problems)
+		}
 	}
 }
 
@@ -320,5 +324,42 @@ func TestToolNameResolutionAndMention(t *testing.T) {
 	}
 	if m := mentionedButUncalled("check todoread", known, []parsedCall{{Name: "todoread"}}); len(m) != 0 {
 		t.Errorf("called tool flagged: %v", m)
+	}
+}
+
+func TestBigCatalogScales(t *testing.T) {
+	var ts []oaiTool
+	for _, n := range []string{"read", "bash", "edit", "todoread"} {
+		ts = append(ts, mkTool(n, `{"type":"object","required":["x"],"properties":{"x":{"type":"string"}}}`))
+	}
+	for s := 0; s < 12; s++ {
+		for i := 0; i < 20; i++ {
+			tl := mkTool(fmt.Sprintf("server%d_tool%d", s, i), `{"type":"object","required":["q"],"properties":{"q":{"type":"string","description":"`+strings.Repeat("long ", 80)+`"}}}`)
+			tl.Function.Description = strings.Repeat("blah ", 200)
+			ts = append(ts, tl)
+		}
+	}
+	lm := mkTool("local-memory_search", `{"type":"object","required":["query"],"properties":{"query":{"type":"string"}}}`)
+	lm.Function.Description = "Search local memory"
+	ts = append(ts, lm, mkTool("local-memory_store", `{"type":"object"}`))
+	cat := renderToolCatalog(ts)
+	if len(cat) > 60_000 {
+		t.Errorf("catalog too big for %d tools: %d bytes", len(ts), len(cat))
+	}
+	if !strings.Contains(cat, "### read") || !strings.Contains(cat, "#### local-memory (2)") || !strings.Contains(cat, "- local-memory_search: Search local memory") {
+		t.Errorf("catalog shape wrong")
+	}
+	if strings.Contains(cat, `"q":{"type":"string","description":"long`) {
+		t.Errorf("MCP schemas should be omitted in a big catalog")
+	}
+	rem := renderToolReminder(ts, "/w/repo", "use local-memory to recall the plan")
+	if len(rem) > 6_000 || !strings.Contains(rem, "server0 (20)") || !strings.Contains(rem, "### local-memory_search") || !strings.Contains(rem, `"query"`) {
+		t.Errorf("reminder wrong (%d bytes): %.400s", len(rem), rem)
+	}
+	// Bad args to an MCP tool → the exact schema comes back.
+	sch := parseSchemas(ts)
+	_, _, problems, _ := extractToolCallsChecked("```tool_call\n{\"name\":\"local-memory_search\",\"arguments\":{}}\n```", map[string]bool{"local-memory_search": true}, sch)
+	if len(problems) != 2 || !strings.Contains(problems[1], `exact schema: `) || !strings.Contains(problems[1], `"required":["query"]`) {
+		t.Errorf("schema on demand missing: %v", problems)
 	}
 }

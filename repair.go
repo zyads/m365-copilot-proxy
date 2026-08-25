@@ -91,6 +91,7 @@ func escapeRawControlChars(s string) string {
 type toolSchema struct {
 	Required   []string                   `json:"required"`
 	Properties map[string]json.RawMessage `json:"properties"`
+	raw        json.RawMessage            // full schema, sent back on demand
 }
 
 func parseSchemas(tools []oaiTool) map[string]toolSchema {
@@ -98,6 +99,7 @@ func parseSchemas(tools []oaiTool) map[string]toolSchema {
 	for _, t := range tools {
 		var s toolSchema
 		_ = json.Unmarshal(t.Function.Parameters, &s)
+		s.raw = t.Function.Parameters
 		out[t.Function.Name] = s
 	}
 	return out
@@ -125,6 +127,9 @@ func validateArgs(name string, args json.RawMessage, schemas map[string]toolSche
 				problems = append(problems, fmt.Sprintf("%s: unknown argument %q (valid: %s)", name, k, strings.Join(keys(sc.Properties), ", ")))
 			}
 		}
+	}
+	if len(problems) > 0 && len(sc.raw) > 0 {
+		problems = append(problems, fmt.Sprintf("%s: exact schema: %s", name, compactJSON(sc.raw)))
 	}
 	return problems
 }

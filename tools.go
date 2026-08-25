@@ -46,26 +46,97 @@ Rules:
 ## Available tools
 `
 
-const maxToolDescription = 400 // MCP servers ship essays; the model needs the gist
+const (
+	maxToolDescription  = 400 // core tools
+	maxMCPDescription   = 140 // one-liners in the grouped MCP listing
+	groupMinSize        = 2   // a shared "<server>_" prefix with ≥2 tools is an MCP server
+	maxFullSchemaTools  = 24  // above this many tools, only core tools keep schemas
+	reminderNamesPerSrv = 8   // names shown per server in standing orders
+)
 
-// renderToolCatalog produces the compact tool listing appended to the
-// protocol. Sent in full only when a Graph conversation is created — Copilot
-// keeps conversation state, so later turns get renderToolReminder instead.
-func renderToolCatalog(tools []oaiTool) string {
-	var sb strings.Builder
+// toolGroups splits tools into core (no server prefix) and MCP servers keyed
+// by prefix (OpenCode names MCP tools "<server>_<tool>").
+type toolGroups struct {
+	core    []oaiTool
+	servers map[string][]oaiTool
+	order   []string // server names, sorted
+}
+
+func groupTools(tools []oaiTool) toolGroups {
+	count := map[string]int{}
+	for _, t := range tools {
+		if i := strings.Index(t.Function.Name, "_"); i > 0 {
+			count[t.Function.Name[:i]]++
+		}
+	}
+	g := toolGroups{servers: map[string][]oaiTool{}}
 	for _, t := range tools {
 		if t.Type != "function" {
 			continue
 		}
-		desc := strings.TrimSpace(t.Function.Description)
-		if len(desc) > maxToolDescription {
-			desc = desc[:maxToolDescription] + "…"
+		if i := strings.Index(t.Function.Name, "_"); i > 0 && count[t.Function.Name[:i]] >= groupMinSize {
+			g.servers[t.Function.Name[:i]] = append(g.servers[t.Function.Name[:i]], t)
+			continue
 		}
-		fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, desc)
-		if len(t.Function.Parameters) > 0 {
-			fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactJSON(t.Function.Parameters))
+		g.core = append(g.core, t)
+	}
+	for k := range g.servers {
+		g.order = append(g.order, k)
+	}
+	sort.Strings(g.order)
+	return g
+}
+
+func clip(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
+}
+
+func renderToolFull(t oaiTool, descMax int) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, clip(t.Function.Description, descMax))
+	if len(t.Function.Parameters) > 0 {
+		fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactJSON(t.Function.Parameters))
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// renderToolCatalog scales from 5 tools to 500. Core tools always get full
+// schemas. MCP tools are grouped by server as one-liners (no schemas) unless
+// the whole catalog is small; the exact schema comes back on demand — when a
+// call has bad/missing arguments (see repairNudge) or the user names the
+// tool/server (see renderToolReminder).
+func renderToolCatalog(tools []oaiTool) string {
+	g := groupTools(tools)
+	var sb strings.Builder
+	full := len(tools) <= maxFullSchemaTools
+	if len(g.core) > 0 {
+		sb.WriteString("### Core tools (full schemas)\n\n")
+		for _, t := range g.core {
+			sb.WriteString(renderToolFull(t, maxToolDescription))
+		}
+	}
+	if len(g.order) > 0 {
+		fmt.Fprintf(&sb, "### MCP server tools (%d servers, %d tools) — call by EXACT name\n", len(g.order), len(tools)-len(g.core))
+		if !full {
+			sb.WriteString("Schemas omitted for brevity: pass the obvious arguments from the description; if required arguments are missing you will receive the exact schema and can retry.\n")
 		}
 		sb.WriteString("\n")
+		for _, srv := range g.order {
+			fmt.Fprintf(&sb, "#### %s (%d)\n", srv, len(g.servers[srv]))
+			for _, t := range g.servers[srv] {
+				if full {
+					sb.WriteString(renderToolFull(t, maxToolDescription))
+				} else {
+					fmt.Fprintf(&sb, "- %s: %s\n", t.Function.Name, clip(t.Function.Description, maxMCPDescription))
+				}
+			}
+			sb.WriteString("\n")
+		}
 	}
 	return sb.String()
 }
@@ -73,15 +144,11 @@ func renderToolCatalog(tools []oaiTool) string {
 // renderToolReminder is the per-turn "standing orders" on a reused
 // conversation. Field-tested: Copilot's server-side persona reasserts over
 // turns and it forgets where it is, so every turn restates who it is, the
-// sandbox/M365 ban, the protocol, the tool names, and the working directory.
-// Still small (<1 KB) even with dozens of MCP tools attached.
-func renderToolReminder(tools []oaiTool, root string) string {
-	names := make([]string, 0, len(tools))
-	for _, t := range tools {
-		if t.Type == "function" {
-			names = append(names, t.Function.Name)
-		}
-	}
+// sandbox/M365 ban, the protocol, the tools, and the working directory.
+// With hundreds of MCP tools the list is summarised per server; tools or
+// servers the user just NAMED get their full definitions included.
+func renderToolReminder(tools []oaiTool, root, userMsg string) string {
+	g := groupTools(tools)
 	var sb strings.Builder
 	sb.WriteString("=== STANDING ORDERS (every turn) ===\n")
 	sb.WriteString("You are an autonomous coding agent in the developer's terminal. No sandbox, no /mnt/data, no Teams/mail/SharePoint/\"records\" — the repo on the developer's machine is the only source of truth, reachable ONLY via tools.\n")
@@ -89,17 +156,50 @@ func renderToolReminder(tools []oaiTool, root string) string {
 		sb.WriteString("Working directory (the repo): " + root + " — never ask for a path or branch; look with git status / ls / read.\n")
 	}
 	sb.WriteString("To act, emit ```tool_call fenced JSON: {\"name\": \"<tool>\", \"arguments\": {...}} — one object per block, several blocks for several calls, then STOP and wait for results. Never narrate what you would do; do it. Never ask the developer for files, paths or output you can fetch. Plain prose (no tool_call) only when the task is DONE. Begin with a brief <thinking>…</thinking>.\n")
-	sb.WriteString("Tools (definitions were given at the start of this conversation): " + strings.Join(names, ", ") + "\n")
+	names := make([]string, 0, len(g.core))
+	for _, t := range g.core {
+		names = append(names, t.Function.Name)
+	}
+	sb.WriteString("Core tools: " + strings.Join(names, ", ") + "\n")
+	if len(g.order) > 0 {
+		sb.WriteString("MCP servers (tools are named <server>_<tool>; full list was given at the start of this conversation):\n")
+		for _, srv := range g.order {
+			ts := g.servers[srv]
+			var few []string
+			for i, t := range ts {
+				if i >= reminderNamesPerSrv {
+					few = append(few, fmt.Sprintf("… +%d more", len(ts)-i))
+					break
+				}
+				few = append(few, strings.TrimPrefix(t.Function.Name, srv+"_"))
+			}
+			fmt.Fprintf(&sb, "  - %s (%d): %s\n", srv, len(ts), strings.Join(few, ", "))
+		}
+	}
+	// Anything the user named this turn: full definitions, so it cannot claim
+	// the tool "isn't exposed".
+	if userMsg != "" {
+		known := map[string]bool{}
+		for _, t := range tools {
+			known[t.Function.Name] = true
+		}
+		if hit := mentionedTools(userMsg, known); len(hit) > 0 {
+			sb.WriteString("The developer referred to these tools — they ARE available; use them:\n")
+			byName := map[string]oaiTool{}
+			for _, t := range tools {
+				byName[t.Function.Name] = t
+			}
+			for i, n := range hit {
+				if i >= 12 {
+					fmt.Fprintf(&sb, "… +%d more\n", len(hit)-i)
+					break
+				}
+				sb.WriteString(renderToolFull(byName[n], maxToolDescription))
+			}
+		}
+	}
 	sb.WriteString("=== END STANDING ORDERS ===")
 	return sb.String()
-}
-
-func compactJSON(raw json.RawMessage) string {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
-		return string(raw)
-	}
-	return buf.String()
 }
 
 // Accept the fenced form and, leniently, an XML form some models drift into.
@@ -282,4 +382,12 @@ func wordIn(hay, needle string) bool {
 
 func mentionNudge(names []string) string {
 	return "The developer explicitly asked you to use: " + strings.Join(names, ", ") + ". You did not call any of them. Call the appropriate one NOW with a ```tool_call block. Do not explain, do not ask — call it."
+}
+
+func compactJSON(raw json.RawMessage) string {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return string(raw)
+	}
+	return buf.String()
 }

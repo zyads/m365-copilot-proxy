@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# copilot-proxy — control the persistent proxy: status | start | restart | stop | logs | update | auth
+set -euo pipefail
+INSTALL_DIR="${M365_PROXY_DIR:-$HOME/.m365-copilot-proxy}"
+CONF_DIR="$HOME/.config/m365-copilot-proxy"
+URL="http://127.0.0.1:${PROXY_PORT:-8080}"
+OS="$(uname -s)"
+
+svc() {  # start|restart|stop
+  if [ "$OS" = Linux ] && command -v systemctl >/dev/null && systemctl --user cat m365-copilot-proxy.service >/dev/null 2>&1; then
+    systemctl --user "$1" m365-copilot-proxy.service
+  elif [ "$OS" = Darwin ] && [ -f "$HOME/Library/LaunchAgents/com.zyads.m365-copilot-proxy.plist" ]; then
+    case "$1" in
+      start)   launchctl load -w "$HOME/Library/LaunchAgents/com.zyads.m365-copilot-proxy.plist" 2>/dev/null || true ;;
+      stop)    launchctl unload "$HOME/Library/LaunchAgents/com.zyads.m365-copilot-proxy.plist" ;;
+      restart) launchctl kickstart -k "gui/$(id -u)/com.zyads.m365-copilot-proxy" ;;
+    esac
+  else
+    # No service manager: detach fully so it survives the terminal closing.
+    case "$1" in
+      stop|restart) pkill -f "$INSTALL_DIR/m365-copilot-proxy" 2>/dev/null || true ;;
+    esac
+    case "$1" in
+      start|restart)
+        set -a; . "$CONF_DIR/env"; set +a
+        mkdir -p "$CONF_DIR/logs"
+        if command -v setsid >/dev/null; then
+          setsid nohup "$INSTALL_DIR/m365-copilot-proxy" >>"$CONF_DIR/logs/proxy.log" 2>&1 < /dev/null &
+        else
+          nohup "$INSTALL_DIR/m365-copilot-proxy" >>"$CONF_DIR/logs/proxy.log" 2>&1 < /dev/null &
+        fi
+        disown 2>/dev/null || true ;;
+    esac
+  fi
+}
+
+case "${1:-status}" in
+  status)  curl -sf "$URL/healthz" >/dev/null && { echo "running  $(curl -s $URL/version)"; curl -s "$URL/auth"; echo; curl -s "$URL/stats"; echo; } || echo "not running" ;;
+  start|restart|stop) svc "$1" ;;
+  logs)
+    if [ "$OS" = Linux ] && command -v journalctl >/dev/null; then journalctl --user -u m365-copilot-proxy -f
+    else tail -f "$CONF_DIR/logs/proxy.log"; fi ;;
+  update)  curl -s -X POST "$URL/update"; echo ;;
+  auth)    curl -s "$URL/auth"; echo ;;
+  *) echo "usage: copilot-proxy status|start|restart|stop|logs|update|auth" >&2; exit 1 ;;
+esac

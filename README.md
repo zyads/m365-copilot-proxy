@@ -70,6 +70,30 @@ What it does: the startup probe logs `POSSIBLE MODEL KNOBS` if Microsoft ever
 adds one to the schema; then set `GRAPH_EXTRA_BODY='{"model":"..."}'` and every
 chat body carries it. No code change.
 
+## Install (persistent + self-updating)
+```sh
+curl -fsSL https://raw.githubusercontent.com/zyads/m365-copilot-proxy/main/install.sh | bash
+opencode-copilot        # every time: ensures proxy is up + current, signs in once, launches OpenCode
+```
+`install.sh` builds, asks for tenant/client id once (stored 0600 in
+`~/.config/m365-copilot-proxy/env`), installs a **user service** (systemd
+with linger on Linux, launchd on macOS — survives logout, starts at boot;
+nohup/setsid fallback elsewhere) and two commands:
+- `opencode-copilot [args]` — start-if-down → `POST /update` (pull, rebuild,
+  re-exec when idle if main moved) → show device code if not signed in → `exec opencode`.
+- `copilot-proxy status|start|restart|stop|logs|update|auth`.
+
+The proxy also checks origin/main itself on startup and every 6h
+(`UPDATE_INTERVAL_MIN`, `AUTO_UPDATE=off`). A failed build rolls the checkout
+back; the old binary keeps running.
+
+## Visible thinking
+OpenCode shows a collapsible thinking block for `reasoning_content` deltas.
+Copilot has no reasoning tokens, so the proxy asks it to think inside
+`<thinking>…</thinking>` first, splits that out, and streams it as
+reasoning — the answer/tool calls stay clean. Planning before acting also
+measurably improves protocol adherence. `THINKING=off` to disable.
+
 ## Entra app registration — what you actually need
 - Delegated Graph permissions consented (you already have this).
 - **Authentication → Advanced settings → Allow public client flows: Yes.**

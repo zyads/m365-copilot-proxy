@@ -38,6 +38,50 @@ type Authenticator struct {
 	http *http.Client
 	mu   sync.Mutex
 	tok  *tokenSet
+
+	// Device-code state for headless runs (service with no terminal): the
+	// launcher polls /auth and shows the user the code.
+	pmu     sync.Mutex
+	pending *pendingAuth
+	lastErr string
+}
+
+type pendingAuth struct {
+	Message         string `json:"message"`
+	VerificationURI string `json:"verification_uri"`
+	UserCode        string `json:"user_code"`
+	ExpiresAt       time.Time
+}
+
+// Status is what /auth returns.
+func (a *Authenticator) Status() map[string]any {
+	a.mu.Lock()
+	ok := a.tok != nil && time.Until(a.tok.ExpiresAt) > 0
+	hasRT := a.tok != nil && a.tok.RefreshToken != ""
+	a.mu.Unlock()
+	a.pmu.Lock()
+	defer a.pmu.Unlock()
+	out := map[string]any{"authenticated": ok || hasRT, "mode": a.cfg.AuthMode}
+	if a.pending != nil && time.Now().Before(a.pending.ExpiresAt) {
+		out["pending"] = a.pending
+	}
+	if a.lastErr != "" {
+		out["last_error"] = a.lastErr
+	}
+	return out
+}
+
+// EnsureAsync kicks off sign-in in the background if there is no usable
+// token, so a headless service can start and expose the code via /auth.
+func (a *Authenticator) EnsureAsync() {
+	go func() {
+		if _, err := a.Token(context.Background()); err != nil {
+			a.pmu.Lock()
+			a.lastErr = err.Error()
+			a.pmu.Unlock()
+			log.Printf("auth: %v", err)
+		}
+	}()
 }
 
 func NewAuthenticator(cfg Config) *Authenticator {
@@ -187,6 +231,12 @@ func (a *Authenticator) deviceCode(ctx context.Context) (*tokenSet, error) {
 	}
 	fmt.Fprintf(os.Stderr, "\n=== Microsoft sign-in required ===\n%s\n(open %s and enter code %s)\n\n",
 		dc.Message, dc.VerificationURI, dc.UserCode)
+	a.pmu.Lock()
+	a.pending = &pendingAuth{Message: dc.Message, VerificationURI: dc.VerificationURI, UserCode: dc.UserCode,
+		ExpiresAt: time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)}
+	a.lastErr = ""
+	a.pmu.Unlock()
+	defer func() { a.pmu.Lock(); a.pending = nil; a.pmu.Unlock() }()
 
 	interval := time.Duration(max(dc.Interval, 5)) * time.Second
 	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)

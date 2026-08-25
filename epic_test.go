@@ -145,3 +145,50 @@ func TestArgRepairNudge(t *testing.T) {
 		t.Errorf("stats: %v", st)
 	}
 }
+
+func TestThinkingSplit(t *testing.T) {
+	r, rest := splitThinking("<thinking>need to read the file</thinking>\n```tool_call\n{\"name\":\"read\",\"arguments\":{\"path\":\"a\"}}\n```")
+	if r != "need to read the file" || !strings.HasPrefix(rest, "```tool_call") {
+		t.Errorf("closed: %q | %q", r, rest)
+	}
+	r, rest = splitThinking("<thinking>ran out of")
+	if r != "ran out of" || rest != "" {
+		t.Errorf("unclosed: %q | %q", r, rest)
+	}
+	r, rest = splitThinking("plain answer")
+	if r != "" || rest != "plain answer" {
+		t.Errorf("none: %q | %q", r, rest)
+	}
+}
+
+func TestThinkingSurfacedAsReasoning(t *testing.T) {
+	g := newFakeGraph(t, func(string) string {
+		return "<thinking>list first, then decide</thinking>\n```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}\n```"
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"go"}]}`)
+	m := out.Choices[0].Message
+	if m.Reasoning != "list first, then decide" || len(m.ToolCalls) != 1 || strings.Contains(string(m.Content), "thinking") {
+		t.Fatalf("reasoning not split: %+v", m)
+	}
+	// Instruction present in contexts.
+	found := false
+	for _, c := range g.ctxs[0] {
+		if strings.Contains(c.Text, "<thinking>") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("thinking instruction not sent")
+	}
+	// Streaming carries reasoning_content deltas before content.
+	resp, _ := post(t, p.URL, `{"model":"m365-copilot","stream":true,`+tools+`,"messages":[{"role":"user","content":"go again"}]}`)
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	ri, ti := strings.Index(body, `"reasoning_content":"list first`), strings.Index(body, `"tool_calls"`)
+	if ri < 0 || ti < 0 || ri > ti {
+		t.Errorf("stream order wrong: reasoning@%d tool_calls@%d", ri, ti)
+	}
+}

@@ -64,7 +64,7 @@ func newProxy(t *testing.T, graphURL string) *httptest.Server {
 	cfg.MaxRetries = 0
 	auth := &Authenticator{cfg: cfg, http: http.DefaultClient,
 		tok: &tokenSet{AccessToken: "TESTTOKEN", ExpiresAt: time.Now().Add(time.Hour)}}
-	s := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour), repo: NewRepoMapper()}
+	s := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour), repo: NewRepoMapper(), auth: auth, upd: &Updater{cfg: cfg}}
 	return httptest.NewServer(s.routes())
 }
 
@@ -103,8 +103,8 @@ func TestPlainChat(t *testing.T) {
 			t.Errorf("missing %q in %q", want, got)
 		}
 	}
-	if len(g.ctxs[0]) != 2 || g.ctxs[0][0].Text != defaultPersona || g.ctxs[0][1].Text != "You are terse." {
-		t.Errorf("contexts should be [persona, system]: %+v", g.ctxs[0])
+	if len(g.ctxs[0]) != 3 || g.ctxs[0][0].Text != defaultPersona || g.ctxs[0][1].Text != thinkingInstruction || g.ctxs[0][2].Text != "You are terse." {
+		t.Errorf("contexts should be [persona, thinking, system]: %d", len(g.ctxs[0]))
 	}
 	if *out.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish %v", *out.Choices[0].FinishReason)
@@ -138,7 +138,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if string(m.Content) != "Let me look." {
 		t.Errorf("prose should be stripped of blocks: %q", m.Content)
 	}
-	if len(g.ctxs[0]) != 3 || !strings.Contains(g.ctxs[0][2].Text, "### read") || !strings.Contains(g.ctxs[0][2].Text, "### bash") {
+	if last := g.ctxs[0][len(g.ctxs[0])-1].Text; len(g.ctxs[0]) != 4 || !strings.Contains(last, "### read") || !strings.Contains(last, "### bash") {
 		t.Errorf("tool protocol context missing: %+v", g.ctxs[0])
 	}
 

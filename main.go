@@ -34,6 +34,8 @@ type Server struct {
 	convs *ConvCache
 	repo  *RepoMapper
 	stats Stats
+	auth  *Authenticator
+	upd   *Updater
 	locks sync.Map // convID -> *sync.Mutex; serialises writes to one Graph conversation
 }
 
@@ -50,7 +52,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("/stats", s.stats.handler)
-	return logMiddleware(mux)
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, s.auth.Status()) })
+	mux.HandleFunc("/update", s.upd.handler)
+	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		local, _, _, _ := s.upd.Check()
+		writeJSON(w, 200, map[string]any{"commit": short(local), "repo": s.upd.repo})
+	})
+	return s.upd.track(logMiddleware(mux))
 }
 
 func logMiddleware(next http.Handler) http.Handler {
@@ -92,6 +100,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var contexts []graphContext
 	if pc := personaContext(s.cfg); pc != nil {
 		contexts = append(contexts, *pc) // first, so it frames everything after
+	}
+	if s.cfg.Thinking {
+		contexts = append(contexts, graphContext{Description: "Reply format. Always in force.", Text: thinkingInstruction})
 	}
 	if system != "" {
 		contexts = append(contexts, graphContext{
@@ -170,6 +181,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// --- Translate reply: prose and/or tool calls; repair, enforce, re-prompt. ---
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	toolsOffered := len(req.Tools) > 0
+	var reasoning string
+	if s.cfg.Thinking {
+		reasoning, text = splitThinking(text)
+	}
 	prose, calls, problems, repaired := extractToolCallsChecked(text, known, schemas)
 	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
@@ -187,8 +202,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if nudge != "" {
 			s.stats.Nudges.Add(1)
 			if t2, s2, err2 := s.graph.Send(ctx, convID, nudge, contexts); err2 == nil {
+				r2think := ""
+				if s.cfg.Thinking {
+					r2think, t2 = splitThinking(t2)
+				}
 				if p2, c2, _, r2 := extractToolCallsChecked(t2, known, schemas); len(c2) > 0 {
 					text, sources, prose, calls, nudged = t2, s2, p2, c2, true
+					if r2think != "" {
+						reasoning = strings.TrimSpace(reasoning + "\n\n" + r2think)
+					}
 					s.stats.Repairs.Add(int64(r2))
 				}
 			} else {
@@ -201,7 +223,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.stats.ToolCalls.Add(int64(len(calls)))
 	s.stats.observe(time.Since(started))
 
-	reply := oaiMessage{Role: "assistant"}
+	reply := oaiMessage{Role: "assistant", Reasoning: reasoning, Reasoning2: reasoning}
 	finish := "stop"
 	if len(calls) > 0 {
 		reply.ToolCalls = toOpenAIToolCalls(calls, id[len(id)-8:])
@@ -257,6 +279,9 @@ func (s *Server) writeStream(w http.ResponseWriter, id, model string, reply oaiM
 		}
 	}
 	emit(chunk(&oaiMessage{Role: "assistant", Content: ""}, nil))
+	for _, piece := range splitChunks(reply.Reasoning, 32) {
+		emit(chunk(&oaiMessage{Reasoning: piece, Reasoning2: piece}, nil))
+	}
 	for _, piece := range splitChunks(string(reply.Content), 24) {
 		emit(chunk(&oaiMessage{Content: oaiContent(piece)}, nil))
 	}
@@ -322,6 +347,8 @@ func callNames(calls []parsedCall) string {
 	return strings.Join(names, ",")
 }
 
+func sprintf(format string, a ...any) string { return fmt.Sprintf(format, a...) }
+
 func shortID(s string) string {
 	if len(s) > 12 {
 		return s[:12]
@@ -348,14 +375,25 @@ func main() {
 	}
 	auth := NewAuthenticator(cfg)
 	graph := &GraphClient{cfg: cfg, auth: auth, http: &http.Client{Timeout: cfg.RequestTimeout}}
-	srv := &Server{cfg: cfg, graph: graph, convs: NewConvCache(cfg.ConvTTL), repo: NewRepoMapper()}
+	upd := NewUpdater(cfg)
+	srv := &Server{cfg: cfg, graph: graph, convs: NewConvCache(cfg.ConvTTL), repo: NewRepoMapper(), auth: auth, upd: upd}
 
-	// Warm the token now so the device-code prompt appears at startup, not
-	// mid-request; then probe Graph for anything model-selector-shaped.
-	if _, err := auth.Token(context.Background()); err != nil {
-		log.Fatalf("initial auth failed: %v", err)
+	// Sign in in the background: on a terminal the code prints here; as a
+	// service the launcher reads it from /auth. Then probe Graph.
+	auth.EnsureAsync()
+	go func() {
+		for i := 0; i < 600; i++ { // wait up to 10 min for sign-in before probing
+			if st := auth.Status(); st["authenticated"] == true {
+				graph.Probe(context.Background())
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+	go upd.Loop(context.Background())
+	if upd.repo != "" {
+		log.Printf("update: git install at %s (auto=%v every %s)", upd.repo, cfg.AutoUpdate, cfg.UpdateInterval)
 	}
-	go graph.Probe(context.Background())
 
 	log.Printf("m365-copilot-proxy on http://%s  model=%s auth=%s tools=shim conv-reuse=on repomap=%v enforce=%v", cfg.Listen, cfg.ModelName, cfg.AuthMode, cfg.RepoMap, cfg.Enforce)
 	log.Fatal(http.ListenAndServe(cfg.Listen, srv.routes()))

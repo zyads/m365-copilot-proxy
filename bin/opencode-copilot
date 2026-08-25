@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# opencode-copilot — "come in, type, go".
+#   1. proxy running?         → start it if not
+#   2. new commits on main?   → pull + rebuild + restart (proxy does it itself)
+#   3. signed in?             → if not, show the device code and wait
+#   4. exec opencode with this repo's provider config
+set -euo pipefail
+INSTALL_DIR="${M365_PROXY_DIR:-$HOME/.m365-copilot-proxy}"
+URL="http://127.0.0.1:${PROXY_PORT:-8080}"
+
+up() { curl -sf "$URL/healthz" >/dev/null 2>&1; }
+wait_up() { for _ in $(seq 1 60); do up && return 0; sleep 0.5; done; return 1; }
+
+if ! up; then
+  echo "proxy: starting…"
+  copilot-proxy start
+  wait_up || { echo "proxy failed to start — see: copilot-proxy logs" >&2; exit 1; }
+fi
+
+# Check/apply updates. Synchronous; the proxy re-execs when idle, so wait
+# for it to come back if it says it updated.
+upd=$(curl -s -X POST "$URL/update" 2>/dev/null || echo '{}')
+if echo "$upd" | grep -q '"updated":true'; then
+  echo "proxy: updated → $(echo "$upd" | sed -n 's/.*"remote":"\([^"]*\)".*/\1/p'), restarting…"
+  sleep 1; wait_up || { echo "proxy did not come back after update — see: copilot-proxy logs" >&2; exit 1; }
+elif echo "$upd" | grep -q '"error"'; then
+  echo "proxy: update check failed (continuing with current build): $upd" >&2
+fi
+
+# First-time sign-in: the service has no terminal, so read the code from /auth.
+shown=""
+for _ in $(seq 1 900); do
+  st=$(curl -s "$URL/auth")
+  echo "$st" | grep -q '"authenticated":true' && break
+  msg=$(echo "$st" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+  if [ -n "$msg" ] && [ "$msg" != "$shown" ]; then
+    echo; echo "=== Microsoft sign-in required ==="; echo "$msg"; echo; shown="$msg"
+  fi
+  if echo "$st" | grep -q '"last_error"' && [ -z "$msg" ]; then
+    echo "sign-in error: $(echo "$st" | sed -n 's/.*"last_error":"\([^"]*\)".*/\1/p')" >&2
+    echo "restart the flow with: copilot-proxy restart" >&2; exit 1
+  fi
+  sleep 1
+done
+
+export OPENCODE_CONFIG="${OPENCODE_CONFIG:-$INSTALL_DIR/opencode.json}"
+exec opencode "$@"

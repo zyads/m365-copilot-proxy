@@ -29,6 +29,10 @@ type Config struct {
 	DebugDir       string // if set, dump every prompt/reply pair here as JSON
 	DebugRaw       bool   // DEBUG_RAW=1 keeps dumps un-redacted (local use only)
 	ToolResultMax  int    // bytes of one tool result kept verbatim (head+tail beyond)
+	AutoUpdate     bool   // check origin/main on startup + every UpdateInterval
+	UpdateInterval time.Duration
+	RepoDir        string // git checkout to update from (default: dir of the binary)
+	Thinking       bool   // ask for <thinking> and surface it as reasoning_content (default on)
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -75,6 +79,10 @@ func loadConfig() Config {
 		DebugDir:       os.Getenv("DEBUG_DIR"),
 		DebugRaw:       os.Getenv("DEBUG_RAW") == "1",
 		ToolResultMax:  envInt("MAX_TOOL_RESULT", defaultToolResultBudget),
+		AutoUpdate:     env("AUTO_UPDATE", "on") != "off",
+		UpdateInterval: time.Duration(envInt("UPDATE_INTERVAL_MIN", 360)) * time.Minute,
+		RepoDir:        os.Getenv("REPO_DIR"),
+		Thinking:       env("THINKING", "on") != "off",
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

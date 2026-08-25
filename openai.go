@@ -53,6 +53,8 @@ type oaiToolCall struct {
 type oaiMessage struct {
 	Role       string        `json:"role,omitempty"`
 	Content    oaiContent    `json:"content"`
+	Reasoning  string        `json:"reasoning_content,omitempty"` // DeepSeek-style; AI SDK renders as thinking
+	Reasoning2 string        `json:"reasoning,omitempty"`         // newer openai-compatible field name
 	Name       string        `json:"name,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"` // on role:"tool"

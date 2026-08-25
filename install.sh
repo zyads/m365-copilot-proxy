@@ -44,13 +44,14 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "Auth mode: device_code (needs 'Allow public client flows'; often blocked by Conditional Access)"
   echo "           browser     (auth-code+PKCE via http://localhost:8080/auth/callback — register that redirect URI; CAP-friendly)"
   read -rp "AUTH_MODE [device_code/browser] (default device_code): " amode
+  read -rp "Port (default 8080): " port; port="${port:-8080}"
   {
     echo "M365_TENANT_ID=$tid"
     echo "M365_CLIENT_ID=$cid"
     [ -n "$csec" ] && echo "M365_CLIENT_SECRET=$csec"
     [ -n "$amode" ] && echo "AUTH_MODE=$amode"
     echo "REPO_DIR=$INSTALL_DIR"
-    echo "LISTEN=127.0.0.1:8080"
+    echo "LISTEN=127.0.0.1:$port"
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi

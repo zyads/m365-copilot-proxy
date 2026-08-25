@@ -2,8 +2,13 @@
 # copilot-proxy — control the persistent proxy: status | start | restart | stop | logs | update | auth | login | seed-token
 set -euo pipefail
 INSTALL_DIR="${M365_PROXY_DIR:-$HOME/.m365-copilot-proxy}"
+# Port: PROXY_PORT env > LISTEN in the env file > 8080.
 CONF_DIR="$HOME/.config/m365-copilot-proxy"
-URL="http://127.0.0.1:${PROXY_PORT:-8080}"
+if [ -z "${PROXY_PORT:-}" ] && [ -f "$CONF_DIR/env" ]; then
+  PROXY_PORT="$(sed -n 's/^LISTEN=.*:\([0-9]*\)$/\1/p' "$CONF_DIR/env" | tail -1)"
+fi
+PROXY_PORT="${PROXY_PORT:-8080}"
+URL="http://127.0.0.1:$PROXY_PORT"
 OS="$(uname -s)"
 
 svc() {  # start|restart|stop

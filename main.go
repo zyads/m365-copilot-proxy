@@ -141,7 +141,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		log.Printf("chat: reusing conversation %s (+%d msgs)", shortID(convID), len(req.Messages)-consumed)
 	}
 	unlock := s.lockConv(convID)
-	defer unlock()
+	defer func() { unlock() }() // closure: the replay path swaps the lock
 
 	// Tool protocol: full catalog on a fresh conversation, names-only reminder
 	// on reuse (Copilot retains the definitions in conversation state).

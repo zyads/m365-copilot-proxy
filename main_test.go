@@ -155,6 +155,11 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if g.convs != 1 {
 		t.Errorf("expected conversation reuse, created %d", g.convs)
 	}
+	// Turn 2 rides the reused conversation: names-only reminder, not the full catalog.
+	tc2 := g.ctxs[1][len(g.ctxs[1])-1].Text
+	if strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") {
+		t.Errorf("reuse turn should carry a names-only reminder, got: %q", tc2)
+	}
 	if len(g.prompts) != 2 || strings.Contains(g.prompts[1], "what does main.go say?") || !strings.Contains(g.prompts[1], "Tool result [read]:\npackage main // hello") {
 		t.Errorf("turn 2 should send only the delta, got: %q", g.prompts[1])
 	}

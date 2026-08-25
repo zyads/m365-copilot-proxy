@@ -105,14 +105,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	known := map[string]bool{}
-	if len(req.Tools) > 0 {
-		for _, t := range req.Tools {
-			known[t.Function.Name] = true
-		}
-		contexts = append(contexts, graphContext{
-			Description: "Tool-calling protocol. You MUST follow it exactly.",
-			Text:        toolProtocol + renderToolCatalog(req.Tools),
-		})
+	for _, t := range req.Tools {
+		known[t.Function.Name] = true
 	}
 
 	// --- Conversation reuse: send only what this Graph conversation hasn't seen. ---
@@ -134,6 +128,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	unlock := s.lockConv(convID)
 	defer unlock()
+
+	// Tool protocol: full catalog on a fresh conversation, names-only reminder
+	// on reuse (Copilot retains the definitions in conversation state).
+	if len(req.Tools) > 0 {
+		text := toolProtocol + renderToolCatalog(req.Tools)
+		if reuse {
+			text = renderToolReminder(req.Tools)
+		}
+		contexts = append(contexts, graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text})
+	}
 
 	render := func(budget int) string {
 		if reuse {

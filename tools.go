@@ -41,20 +41,42 @@ Rules:
 ## Available tools
 `
 
-// renderToolCatalog produces the compact tool listing appended to the protocol.
+const maxToolDescription = 400 // MCP servers ship essays; the model needs the gist
+
+// renderToolCatalog produces the compact tool listing appended to the
+// protocol. Sent in full only when a Graph conversation is created — Copilot
+// keeps conversation state, so later turns get renderToolReminder instead.
 func renderToolCatalog(tools []oaiTool) string {
 	var sb strings.Builder
 	for _, t := range tools {
 		if t.Type != "function" {
 			continue
 		}
-		fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, strings.TrimSpace(t.Function.Description))
+		desc := strings.TrimSpace(t.Function.Description)
+		if len(desc) > maxToolDescription {
+			desc = desc[:maxToolDescription] + "…"
+		}
+		fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, desc)
 		if len(t.Function.Parameters) > 0 {
 			fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactJSON(t.Function.Parameters))
 		}
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// renderToolReminder is the per-turn context on a reused conversation: the
+// protocol rules plus tool names only. Keeps every turn small even with
+// dozens of MCP tools attached.
+func renderToolReminder(tools []oaiTool) string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if t.Type == "function" {
+			names = append(names, t.Function.Name)
+		}
+	}
+	return "Tool-call protocol still applies (```tool_call fenced JSON, one object per block; plain prose when done). " +
+		"Tools available (definitions were given earlier in this conversation): " + strings.Join(names, ", ")
 }
 
 func compactJSON(raw json.RawMessage) string {

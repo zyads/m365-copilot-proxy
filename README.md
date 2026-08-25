@@ -16,6 +16,15 @@ Copilot never touches your files; OpenCode's own local tools do. Copilot is
 just the brain. That's how it "understands the repo" — the same way every
 agent does: by reading it.
 
+## MCP, skills, running commands — yes
+All of that is OpenCode's side of the wire. MCP servers add tools to
+`tools[]`; skills arrive as system-prompt text or a `skill` tool; `bash` is
+just another tool. The proxy offers Copilot **whatever OpenCode sends**, and
+OpenCode executes what Copilot picks — on your machine, under OpenCode's own
+permission rules. Nothing to configure here. To keep turns small with many
+MCP tools attached, the full catalog is sent once per Graph conversation and
+later turns carry a names-only reminder.
+
 ## What's in the box
 - **Tool-calling shim** — strict fenced-JSON protocol injected as a Copilot
   context; parsed back into real OpenAI `tool_calls` (parallel calls, lenient

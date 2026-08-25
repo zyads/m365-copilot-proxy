@@ -47,11 +47,26 @@ case "${1:-status}" in
     else tail -f "$CONF_DIR/logs/proxy.log"; fi ;;
   update)  curl -s -X POST "$URL/update"; echo ;;
   auth)    curl -s "$URL/auth"; echo ;;
+  why)
+    # Plain-English readout of the last turn: paste this when "it was dumb".
+    curl -s "$URL/stats" | python3 -c '
+import json,sys
+d=json.load(sys.stdin); t=d.get("last_turn") or {}
+if not t: print("no turns yet"); sys.exit()
+print("version      :", "'"$(curl -s $URL/version | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"'")
+print("when         :", t.get("time")); print("reuse        :", t.get("reuse"), "| utility:", t.get("utility"), "| nudged:", t.get("nudged"))
+print("tools offered:", t.get("tools_offered"), "->", ", ".join(t.get("tool_names") or []) or "(none)")
+print("tool calls   :", t.get("tool_calls"), "->", t.get("called") or "(none)")
+print("problems     :", t.get("problems") or "(none)")
+print("prompt bytes :", t.get("prompt_bytes"))
+print("reply head   :", (t.get("reply_head") or "").replace("\n"," / "))
+print("totals       : turns=%s nudges=%s repairs=%s replays=%s errors=%s p50=%sms" % (d.get("turns"),d.get("nudges"),d.get("arg_repairs"),d.get("conversation_replays"),d.get("errors"),d.get("latency_p50_ms")))
+' 2>/dev/null || curl -s "$URL/stats" ;;
   login)   (xdg-open "$URL/auth/login" 2>/dev/null || open "$URL/auth/login" 2>/dev/null || echo "open $URL/auth/login") ;;
   seed-token)
     # Bootstrap from a refresh token obtained elsewhere (CAP workaround).
     # Reads from stdin so the token never lands in shell history.
     echo "paste refresh token, then Enter:" >&2; IFS= read -r rt
     printf '{"refresh_token":"%s"}' "$rt" | curl -s -X POST "$URL/auth/seed" -H 'content-type: application/json' -d @-; echo ;;
-  *) echo "usage: copilot-proxy status|start|restart|stop|logs|update|auth|login|seed-token" >&2; exit 1 ;;
+  *) echo "usage: copilot-proxy status|start|restart|stop|logs|update|auth|login|seed-token|why" >&2; exit 1 ;;
 esac

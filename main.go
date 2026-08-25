@@ -219,12 +219,16 @@ func (a *Authenticator) clientCredentials(ctx context.Context) (*tokenSet, error
 
 // refresh exchanges a refresh token for a new access token.
 func (a *Authenticator) refresh(ctx context.Context, rt string) (*tokenSet, error) {
-	r, err := a.postForm(ctx, a.tokenURL(), url.Values{
+	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {a.cfg.ClientID},
 		"refresh_token": {rt},
 		"scope":         {a.cfg.Scopes},
-	})
+	}
+	if a.cfg.ClientSecret != "" {
+		form.Set("client_secret", a.cfg.ClientSecret)
+	}
+	r, err := a.postForm(ctx, a.tokenURL(), form)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +363,7 @@ func (c *oaiContent) UnmarshalJSON(b []byte) error {
 }
 
 type oaiMessage struct {
-	Role    string     `json:"role"`
+	Role    string     `json:"role,omitempty"`
 	Content oaiContent `json:"content"`
 	Name    string     `json:"name,omitempty"`
 }

@@ -27,6 +27,7 @@ type Config struct {
 	RepoMap        bool   // inject the repo map context (default on)
 	Enforce        bool   // re-prompt once when Copilot refuses to use tools (default on)
 	DebugDir       string // if set, dump every prompt/reply pair here as JSON
+	DebugRaw       bool   // DEBUG_RAW=1 keeps dumps un-redacted (local use only)
 	ToolResultMax  int    // bytes of one tool result kept verbatim (head+tail beyond)
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
@@ -72,6 +73,7 @@ func loadConfig() Config {
 		RepoMap:        env("REPO_MAP", "on") != "off",
 		Enforce:        env("ENFORCE_TOOLS", "on") != "off",
 		DebugDir:       os.Getenv("DEBUG_DIR"),
+		DebugRaw:       os.Getenv("DEBUG_RAW") == "1",
 		ToolResultMax:  envInt("MAX_TOOL_RESULT", defaultToolResultBudget),
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,

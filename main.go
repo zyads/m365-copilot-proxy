@@ -290,7 +290,11 @@ func (s *Server) debugDump(id, convID, prompt string, contexts []graphContext, r
 	b, _ := json.MarshalIndent(map[string]any{
 		"id": id, "conversation": convID, "time": time.Now().Format(time.RFC3339),
 		"contexts": contexts, "prompt": prompt, "reply": reply, "tool_calls": calls, "nudged": nudged,
+		"redacted": !s.cfg.DebugRaw,
 	}, "", "  ")
+	if !s.cfg.DebugRaw {
+		b = []byte(redact(string(b)))
+	}
 	_ = os.WriteFile(filepath.Join(s.cfg.DebugDir, id+".json"), b, 0o600)
 }
 

@@ -7,9 +7,9 @@ with device code, drives the Graph Copilot Chat API, and — the important part 
 gives Copilot **tool calling** it doesn't natively have:
 
 ```
-OpenCode ──OpenAI JSON + tools[]──▶ proxy ──prompt + protocol──▶ M365 Copilot
-OpenCode ◀─── OpenAI tool_calls ─── proxy ◀── ```tool_call blocks ── Copilot
-OpenCode runs read/grep/glob/edit/bash ON YOUR REPO, sends results, loop…
+OpenCode  --- OpenAI JSON + tools[] --->  proxy  --- prompt + protocol --->  M365 Copilot
+OpenCode  <--- OpenAI tool_calls -------  proxy  <--- text w/ tool_call blocks ---  Copilot
+OpenCode runs read/grep/glob/edit/bash ON YOUR REPO, sends results back, repeat.
 ```
 
 Copilot never touches your files; OpenCode's own local tools do. Copilot is
@@ -53,8 +53,10 @@ later turns carry a names-only reminder.
 - **`/stats`** — turns, tool calls, nudges, repairs, conv reuse, shrinks,
   latency p50/p95. Curl it while tuning against the real model.
 - **Debug dump** — `DEBUG_DIR=/tmp/copilot-dbg` writes one JSON per turn:
-  exact contexts + prompt Copilot saw, raw reply, whether a nudge fired. Use
-  it to tune the protocol against the real model.
+  exact contexts + prompt Copilot saw, raw reply, whether a nudge fired.
+  **Redacted by default** (emails, GUIDs, tokens, home dirs, tenant hosts,
+  IPs); `DEBUG_RAW=1` keeps raw dumps for local use only. `scrub.sh` applies
+  the same rules to any evidence file before it leaves the machine.
 - **Always-on coding-agent persona** — Copilot shows up as a terse senior
   engineer that ignores your mailbox, not an Office add-in. Override with
   `AGENT_PERSONA="..."`, disable with `AGENT_PERSONA=off`.

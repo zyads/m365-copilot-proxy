@@ -1,18 +1,48 @@
 # FIELD-TEST.md — real-world verification playbook
 
-**Audience: an AI agent (Claude Code / OpenCode / any) running on the work
-machine.** Execute top to bottom. Every step says what to run, what "pass"
-looks like, and what to capture on failure. Do not skip steps; do not fix
-the proxy source yourself unless a step says so — collect evidence and write
-the report at the end. The proxy has NEVER been run against real Microsoft
-Graph; the whole point of this file is first contact.
+**Audience: an AI agent running on the target machine.** Execute top to
+bottom. Every step says what to run, what "pass" looks like, and what to
+capture on failure. Do not skip steps; do not fix the proxy source yourself
+unless a step says so — collect evidence and write the report at the end.
+The proxy has NEVER been run against real Microsoft Graph; the whole point
+of this file is first contact.
 
-Assumptions: Go ≥ 1.22, `git`, `curl`, `jq` available; OpenCode installed;
-the user has an Entra app registration with delegated Graph permissions and
-an M365 Copilot license. Ask the user for `M365_TENANT_ID` and
-`M365_CLIENT_ID` (and `M365_CLIENT_SECRET` only if the app is confidential).
+**Two phases, because of a chicken-and-egg:**
+- **Phase A (steps 0–2)** must be done by a human or any non-Copilot model —
+  the proxy has to be built, signed in, and answering before Copilot can
+  drive anything. It is four commands; budget five minutes.
+- **Phase B (steps 3–9)** can be run by **Copilot itself** through OpenCode
+  (`opencode` with `opencode.json` from this repo, model `m365/m365-copilot`).
+  Paste this file's Phase B into it as the task. Running the suite through
+  the proxy *is* the test.
 
-Write all evidence to `./field-test/` inside the repo (gitignored).
+## ⚠ De-identification rules — read before anything else
+Everything you capture goes into a public GitHub repo. This is a corporate
+tenant. Therefore:
+1. **Never paste raw** model replies, logs, or dumps that mention people,
+   emails, customers, projects, tickets, internal hostnames, or anything
+   surfaced from mail/Teams/SharePoint. Describe it ("it listed 3 colleagues
+   by name and offered to open a SharePoint doc") instead of quoting it.
+2. Only test on the throwaway repos this file creates under `/tmp`. Never
+   point the agent at a real work repository during this test.
+3. The proxy redacts `DEBUG_DIR` dumps automatically (emails, GUIDs, tokens,
+   home dirs, tenant hosts, IPs). Do **not** set `DEBUG_RAW`.
+4. Before committing, run `./scrub.sh` over every evidence file (the Report
+   step does this), then **read every file** and remove what regexes can't
+   know: names, team names, product code-names, ticket IDs.
+5. `token.json`, `proxy.log`, and `field-test/turns/` are never committed.
+6. If unsure whether something is sensitive, leave it out and say "omitted —
+   possibly sensitive" in the report. Omission is never wrong here.
+
+Assumptions: Go ≥ 1.22, `git`, `curl`, `jq`, `perl` available; OpenCode
+installed; the user has an Entra app registration with delegated Graph
+permissions and an M365 Copilot license. Ask the user for `M365_TENANT_ID`
+and `M365_CLIENT_ID` (and `M365_CLIENT_SECRET` only if the app is
+confidential). Never write those values into any evidence file.
+
+Write all evidence to `./field-test/` inside the repo (gitignored by default).
+
+# Phase A — human or any model
 
 ---
 
@@ -78,6 +108,8 @@ done | tee field-test/02-surface.txt
 ```
 Record which variant worked (or that none did) plus every error body. If a
 `403` mentions a permission name, record it — that's a scope we must add.
+
+# Phase B — Copilot via OpenCode can run this
 
 ## 3. Streaming
 
@@ -175,12 +207,19 @@ Write `field-test/REPORT.md` with, in order:
 8. Latency numbers.
 9. Anything surprising.
 
-Then commit the report on a branch and open a PR to `zyads/m365-copilot-proxy`
-(the maintainer will re-apply it under their own account — that's expected):
+Then scrub, review, and open a PR to `zyads/m365-copilot-proxy` (the
+maintainer re-applies it under their own account — that's expected):
 ```sh
-cd ~/m365-copilot-proxy && sed -i 's#^field-test/$##' .gitignore 2>/dev/null
-git checkout -b field-test-$(date +%Y%m%d) && git add -f field-test/REPORT.md field-test/*.json field-test/*.txt && git commit -m "field test report" && git push -u origin HEAD
-gh pr create --fill
+cd ~/m365-copilot-proxy
+./scrub.sh field-test/REPORT.md field-test/*.json field-test/*.txt
+grep -rniE '@|sharepoint|onmicrosoft|/home/|/Users/' field-test/REPORT.md field-test/*.json field-test/*.txt || echo "no obvious identifiers left"
 ```
-Do NOT commit `proxy.log` or anything under `field-test/turns/` — they can
-contain tenant data. Do NOT commit `token.json`.
+Now open each file and read it top to bottom against the de-identification
+rules. Only then:
+```sh
+git checkout -b field-test-$(date +%Y%m%d)
+git add -f field-test/REPORT.md field-test/*.json field-test/*.txt
+git commit -m "field test report"
+git push -u origin HEAD && gh pr create --fill
+```
+Never commit `proxy.log`, `field-test/turns/`, or `token.json`.

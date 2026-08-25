@@ -34,6 +34,7 @@ type Config struct {
 	UpdateInterval time.Duration
 	RepoDir        string // git checkout to update from (default: dir of the binary)
 	Thinking       bool   // ask for <thinking> and surface it as reasoning_content (default on)
+	InstrInMessage bool   // put persona/protocol/catalog in the message text (default on); off = Graph contexts[]
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -92,6 +93,7 @@ func loadConfig() Config {
 		UpdateInterval: time.Duration(envInt("UPDATE_INTERVAL_MIN", 360)) * time.Minute,
 		RepoDir:        os.Getenv("REPO_DIR"),
 		Thinking:       env("THINKING", "on") != "off",
+		InstrInMessage: env("INSTRUCTIONS_IN", "message") != "contexts",
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

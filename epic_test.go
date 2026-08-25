@@ -174,14 +174,7 @@ func TestThinkingSurfacedAsReasoning(t *testing.T) {
 	if m.Reasoning != "list first, then decide" || len(m.ToolCalls) != 1 || strings.Contains(string(m.Content), "thinking") {
 		t.Fatalf("reasoning not split: %+v", m)
 	}
-	// Instruction present in contexts.
-	found := false
-	for _, c := range g.ctxs[0] {
-		if strings.Contains(c.Text, "<thinking>") {
-			found = true
-		}
-	}
-	if !found {
+	if !strings.Contains(g.prompts[0], "<thinking>") {
 		t.Error("thinking instruction not sent")
 	}
 	// Streaming carries reasoning_content deltas before content.
@@ -199,7 +192,7 @@ func TestThinkingSurfacedAsReasoning(t *testing.T) {
 func TestReplayOnDeadConversation(t *testing.T) {
 	chats := 0
 	var convs []string
-	var lastCtx []graphContext
+	var lastPrompt string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/copilot/conversations":
@@ -209,11 +202,11 @@ func TestReplayOnDeadConversation(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/chat"):
 			chats++
 			var body struct {
-				Contexts []graphContext `json:"contexts"`
+				Message struct{ Text string } `json:"message"`
 			}
 			b, _ := io.ReadAll(r.Body)
 			json.Unmarshal(b, &body)
-			lastCtx = body.Contexts
+			lastPrompt = body.Message.Text
 			if strings.Contains(r.URL.Path, "conv-A") && chats == 2 {
 				w.WriteHeader(400)
 				w.Write([]byte(`{"error":{"code":"BadRequest","message":"Conversation has reached the maximum number of turns"}}`))
@@ -235,13 +228,42 @@ func TestReplayOnDeadConversation(t *testing.T) {
 	if len(convs) != 2 || string(out.Choices[0].Message.Content) != "ok" {
 		t.Fatalf("replay failed: convs=%v out=%+v", convs, out)
 	}
-	if last := lastCtx[len(lastCtx)-1].Text; !strings.Contains(last, "### read") {
-		t.Errorf("replay should carry the full tool catalog, got: %.80q", last)
+	if !strings.Contains(lastPrompt, "### read") || !strings.Contains(lastPrompt, defaultPersona) {
+		t.Errorf("replay should carry full instructions + catalog, got: %.120q", lastPrompt)
 	}
 	resp, _ := http.Get(p.URL + "/stats")
 	var st map[string]any
 	json.NewDecoder(resp.Body).Decode(&st)
 	if st["conversation_replays"].(float64) != 1 {
 		t.Errorf("stats: %v", st)
+	}
+}
+
+func TestUtilityTitleRequest(t *testing.T) {
+	g := newFakeGraph(t, func(p string) string {
+		if strings.Contains(p, defaultPersona) {
+			return "SHOULD NOT HAVE PERSONA"
+		}
+		return "<thinking>short</thinking>\n**Conversation title:** \"Friendly greetng.\""
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot","messages":[{"role":"system","content":"Generate a short title for this conversation. Respond with the title only."},{"role":"user","content":"hey there"}]}`)
+	if got := string(out.Choices[0].Message.Content); got != "Friendly greetng" {
+		t.Fatalf("title not cleaned: %q", got)
+	}
+	if out.Choices[0].Message.Reasoning != "" {
+		t.Error("utility reply must not carry reasoning")
+	}
+	for in, want := range map[string]string{
+		"Title: Fix login bug":             "Fix login bug",
+		"\"Refactor auth\"":                "Refactor auth",
+		"**Suggested title** — Add tests.": "Add tests",
+		"Plain title\nwith a second line":  "Plain title",
+	} {
+		if got := cleanShortAnswer(in); got != want {
+			t.Errorf("cleanShortAnswer(%q)=%q want %q", in, got, want)
+		}
 	}
 }

@@ -16,6 +16,15 @@ Copilot never touches your files; OpenCode's own local tools do. Copilot is
 just the brain. That's how it "understands the repo" — the same way every
 agent does: by reading it.
 
+## Where the instructions go (field-tested)
+Copilot treats Graph `contexts[]` as reference documents — it read OpenCode's
+skills list from there but never "saw" the tool protocol sent the same way.
+So persona, thinking format, system prompt, repo map and the tool catalog are
+placed **inside the message text** (fresh conversation: full preamble; reused
+conversation: names-only reminder). `INSTRUCTIONS_IN=contexts` restores the
+old behaviour if you want to compare. `/stats` → `last_turn` shows, per turn,
+tools offered / tool calls / nudged / prompt bytes / a redacted reply head.
+
 ## MCP, skills, running commands — yes
 All of that is OpenCode's side of the wire. MCP servers add tools to
 `tools[]`; skills arrive as system-prompt text or a `skill` tool; `bash` is

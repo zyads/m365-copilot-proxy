@@ -15,6 +15,15 @@ type Stats struct {
 	Turns, ToolCalls, Nudges, Repairs, RepairFailures, NewConvs, ReusedConvs, Errors, Shrinks, Replays atomic.Int64
 	mu                                                                                                 sync.Mutex
 	lat                                                                                                []time.Duration
+	last                                                                                               map[string]any
+}
+
+// setLast records a redacted one-glance summary of the most recent turn so
+// `copilot-proxy status` alone is enough to diagnose "it was dumb".
+func (s *Stats) setLast(m map[string]any) {
+	s.mu.Lock()
+	s.last = m
+	s.mu.Unlock()
 }
 
 func (s *Stats) observe(d time.Duration) {
@@ -39,8 +48,12 @@ func (s *Stats) percentiles() (p50, p95 time.Duration) {
 
 func (s *Stats) handler(w http.ResponseWriter, _ *http.Request) {
 	p50, p95 := s.percentiles()
+	s.mu.Lock()
+	last := s.last
+	s.mu.Unlock()
 	writeJSON(w, 200, map[string]any{
-		"turns": s.Turns.Load(), "tool_calls": s.ToolCalls.Load(),
+		"last_turn": last,
+		"turns":     s.Turns.Load(), "tool_calls": s.ToolCalls.Load(),
 		"nudges": s.Nudges.Load(), "arg_repairs": s.Repairs.Load(), "arg_repair_failures": s.RepairFailures.Load(),
 		"conversations_new": s.NewConvs.Load(), "conversations_reused": s.ReusedConvs.Load(),
 		"message_shrinks": s.Shrinks.Load(), "conversation_replays": s.Replays.Load(), "errors": s.Errors.Load(),

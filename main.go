@@ -98,24 +98,29 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.RequestTimeout)
 	defer cancel()
 
-	// --- Build contexts: caller's system prompt + tool protocol (if tools). ---
+	// --- Assemble instructions. ---
+	// Field-tested: Copilot treats Graph contexts[] as reference documents and
+	// does not reliably read (or obey) them. So by default every instruction —
+	// persona, thinking format, the caller's system prompt, repo map, tool
+	// protocol + catalog — goes INTO THE MESSAGE TEXT, the one channel it
+	// always reads. INSTRUCTIONS_IN=contexts restores the old behaviour.
 	system, turns := splitSystem(req.Messages)
-	var contexts []graphContext
-	if pc := personaContext(s.cfg); pc != nil {
-		contexts = append(contexts, *pc) // first, so it frames everything after
-	}
-	if s.cfg.Thinking {
-		contexts = append(contexts, graphContext{Description: "Reply format. Always in force.", Text: thinkingInstruction})
+	utility := isUtilityRequest(system, turns, len(req.Tools))
+	var instr []graphContext
+	if !utility {
+		if pc := personaContext(s.cfg); pc != nil {
+			instr = append(instr, *pc)
+		}
+		if s.cfg.Thinking {
+			instr = append(instr, graphContext{Description: "Reply format. Always in force.", Text: thinkingInstruction})
+		}
 	}
 	if system != "" {
-		contexts = append(contexts, graphContext{
-			Description: "System instructions from the calling application. Follow them.",
-			Text:        system,
-		})
+		instr = append(instr, graphContext{Description: "System instructions from the calling application. Follow them.", Text: system})
 	}
-	if s.cfg.RepoMap {
+	if s.cfg.RepoMap && !utility {
 		if rc := s.repo.Context(detectRoot(s.cfg, system)); rc != nil {
-			contexts = append(contexts, *rc)
+			instr = append(instr, *rc)
 		}
 	}
 	known := map[string]bool{}
@@ -145,20 +150,47 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Tool protocol: full catalog on a fresh conversation, names-only reminder
 	// on reuse (Copilot retains the definitions in conversation state).
-	if len(req.Tools) > 0 {
+	toolInstr := func(fresh bool) graphContext {
 		text := toolProtocol + renderToolCatalog(req.Tools)
-		if reuse {
+		if !fresh {
 			text = renderToolReminder(req.Tools)
 		}
-		contexts = append(contexts, graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text})
+		return graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text}
+	}
+	if len(req.Tools) > 0 {
+		instr = append(instr, toolInstr(!reuse))
 	}
 
+	// Route instructions: into the message (default) or Graph contexts.
+	var contexts []graphContext
+	if !s.cfg.InstrInMessage {
+		contexts = instr
+	}
 	render := func(budget int) string {
+		var body string
 		if reuse {
 			_, delta := splitSystem(req.Messages[consumed:])
-			return renderTurns(turns, delta, true, budget)
+			body = renderTurns(turns, delta, true, budget)
+		} else {
+			body = renderTurns(turns, turns, false, budget)
 		}
-		return renderTurns(turns, turns, false, budget)
+		if !s.cfg.InstrInMessage {
+			return body
+		}
+		if reuse {
+			// Conversation already holds the full instructions; short reminder only.
+			var rem []string
+			for _, c := range instr {
+				if strings.HasPrefix(c.Description, "Tool-calling") {
+					rem = append(rem, c.Text)
+				}
+			}
+			if len(rem) == 0 {
+				return body
+			}
+			return strings.Join(rem, "\n\n") + "\n\n" + body
+		}
+		return renderInstructions(instr) + "\n\n" + body
 	}
 
 	// --- Send, shrinking the tool-result budget if Graph says "too large". ---
@@ -194,10 +226,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.stats.NewConvs.Add(1)
 			s.stats.Replays.Add(1)
 			// Fresh conversation needs the full tool catalog, not the reminder.
-			for i := range contexts {
-				if strings.HasPrefix(contexts[i].Description, "Tool-calling protocol") && len(req.Tools) > 0 {
-					contexts[i].Text = toolProtocol + renderToolCatalog(req.Tools)
+			for i := range instr {
+				if strings.HasPrefix(instr[i].Description, "Tool-calling protocol") && len(req.Tools) > 0 {
+					instr[i] = toolInstr(true)
 				}
+			}
+			if !s.cfg.InstrInMessage {
+				contexts = instr
 			}
 			continue
 		}
@@ -251,7 +286,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	s.debugDump(id, convID, prompt, contexts, text, len(calls), nudged)
+	if utility {
+		text, sources, reasoning = cleanShortAnswer(text), "", ""
+	}
+	s.debugDump(id, convID, prompt, instr, text, len(calls), nudged)
+	s.stats.setLast(map[string]any{
+		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_calls": len(calls),
+		"nudged": nudged, "utility": utility, "reuse": reuse, "prompt_bytes": len(prompt),
+		"instructions_in": map[bool]string{true: "message", false: "contexts"}[s.cfg.InstrInMessage],
+		"reply_head":      redact(truncate([]byte(text), 240)),
+	})
 	s.stats.Turns.Add(1)
 	s.stats.ToolCalls.Add(int64(len(calls)))
 	s.stats.observe(time.Since(started))
@@ -378,6 +422,17 @@ func callNames(calls []parsedCall) string {
 		names[i] = c.Name
 	}
 	return strings.Join(names, ",")
+}
+
+// renderInstructions lays the instruction blocks out as a single preamble.
+func renderInstructions(instr []graphContext) string {
+	var sb strings.Builder
+	sb.WriteString("=== INSTRUCTIONS (read fully; they govern this entire conversation) ===\n\n")
+	for _, c := range instr {
+		sb.WriteString("## " + c.Description + "\n" + c.Text + "\n\n")
+	}
+	sb.WriteString("=== END INSTRUCTIONS ===\n\n=== CONVERSATION ===\n")
+	return sb.String()
 }
 
 func lastUserMessage(msgs []oaiMessage) string {

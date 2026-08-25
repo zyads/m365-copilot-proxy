@@ -103,8 +103,14 @@ func TestPlainChat(t *testing.T) {
 			t.Errorf("missing %q in %q", want, got)
 		}
 	}
-	if len(g.ctxs[0]) != 3 || g.ctxs[0][0].Text != defaultPersona || g.ctxs[0][1].Text != thinkingInstruction || g.ctxs[0][2].Text != "You are terse." {
-		t.Errorf("contexts should be [persona, thinking, system]: %d", len(g.ctxs[0]))
+	// Instructions live in the message text (persona, thinking, system), in order.
+	pr := g.prompts[0]
+	pi, ti, si, ci := strings.Index(pr, defaultPersona), strings.Index(pr, thinkingInstruction), strings.Index(pr, "You are terse."), strings.Index(pr, "=== CONVERSATION ===")
+	if pi < 0 || ti < pi || si < ti || ci < si {
+		t.Errorf("instruction order wrong: persona@%d thinking@%d system@%d conv@%d", pi, ti, si, ci)
+	}
+	if len(g.ctxs[0]) != 0 {
+		t.Errorf("contexts should be empty in message mode: %d", len(g.ctxs[0]))
 	}
 	if *out.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish %v", *out.Choices[0].FinishReason)
@@ -138,8 +144,8 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if string(m.Content) != "Let me look." {
 		t.Errorf("prose should be stripped of blocks: %q", m.Content)
 	}
-	if last := g.ctxs[0][len(g.ctxs[0])-1].Text; len(g.ctxs[0]) != 4 || !strings.Contains(last, "### read") || !strings.Contains(last, "### bash") {
-		t.Errorf("tool protocol context missing: %+v", g.ctxs[0])
+	if pr := g.prompts[0]; !strings.Contains(pr, "### read") || !strings.Contains(pr, "### bash") || !strings.Contains(pr, "Tool-call protocol") {
+		t.Errorf("tool protocol missing from message: %.200q", pr)
 	}
 
 	// Turn 2: client echoes assistant msg + tool results + nothing else.
@@ -156,9 +162,8 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 		t.Errorf("expected conversation reuse, created %d", g.convs)
 	}
 	// Turn 2 rides the reused conversation: names-only reminder, not the full catalog.
-	tc2 := g.ctxs[1][len(g.ctxs[1])-1].Text
-	if strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") {
-		t.Errorf("reuse turn should carry a names-only reminder, got: %q", tc2)
+	if tc2 := g.prompts[1]; strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") || strings.Contains(tc2, defaultPersona) {
+		t.Errorf("reuse turn should carry a names-only reminder, got: %.300q", tc2)
 	}
 	if len(g.prompts) != 2 || strings.Contains(g.prompts[1], "what does main.go say?") || !strings.Contains(g.prompts[1], "Tool result [read]:\npackage main // hello") {
 		t.Errorf("turn 2 should send only the delta, got: %q", g.prompts[1])
@@ -286,14 +291,8 @@ func TestRepoMap(t *testing.T) {
 	p := newProxy(t, g.URL)
 	defer p.Close()
 	post(t, p.URL, `{"model":"m365-copilot","messages":[{"role":"system","content":"Working directory: `+root+`"},{"role":"user","content":"hi"}]}`)
-	found := false
-	for _, c := range g.ctxs[0] {
-		if strings.HasPrefix(c.Description, "Repository map") && strings.Contains(c.Text, "main.go") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("repo map context not injected: %+v", g.ctxs[0])
+	if pr := g.prompts[0]; !strings.Contains(pr, "## Repository map") || !strings.Contains(pr, "main.go") {
+		t.Errorf("repo map not injected into message: %.300q", pr)
 	}
 }
 

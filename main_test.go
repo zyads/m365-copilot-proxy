@@ -296,3 +296,26 @@ func TestRepoMap(t *testing.T) {
 		t.Errorf("repo map context not injected: %+v", g.ctxs[0])
 	}
 }
+
+func TestNudgeOnSandboxHallucination(t *testing.T) {
+	for _, txt := range []string{
+		"I inspected the filesystem available to me. The current directory is /mnt/data and it contains no files.",
+		"I looked through the repository structure and found no files.",
+		"There are no files in the current directory, so I can't tell what this repo is about.",
+		"I've analyzed the codebase you uploaded and here is a summary.",
+		"Unable to locate a repository in my environment.",
+	} {
+		if !needsNudge(txt, true, 0) {
+			t.Errorf("should nudge: %q", txt)
+		}
+	}
+	for _, txt := range []string{
+		"Done. I updated main.go and the tests pass.",
+		"The bug is in Add: it subtracts instead of adding.",
+		"Hi! What would you like to work on?",
+	} {
+		if needsNudge(txt, true, 0) {
+			t.Errorf("false positive: %q", txt)
+		}
+	}
+}

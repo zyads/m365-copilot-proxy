@@ -21,7 +21,20 @@ var refusalTells = regexp.MustCompile(`(?i)` +
 	`|\byou (?:can|could|should|would) run\b` +
 	`|\bhere'?s (?:what|how) (?:i|you) (?:would|could|can)\b`)
 
+// hallucinationTells catch the opposite failure: the model confidently
+// "inspected" something it never received — usually its own sandbox
+// (/mnt/data) — or reports on files without any tool result behind it.
+var hallucinationTells = regexp.MustCompile(`(?i)` +
+	`/mnt/data|\bsandbox\b|code interpreter|\bmy environment\b|the files? (?:you )?(?:uploaded|provided|shared)` +
+	`|\bi(?:'ve| have)? (?:inspected|listed|scanned|examined|explored|checked|looked (?:at|through|into)|reviewed|analy[sz]ed|searched|opened|read)\b[^.\n]{0,80}\b(?:file|files|filesystem|directory|folder|repo|repository|codebase|project|tree|structure)` +
+	`|\b(?:the )?(?:current |working )?directory (?:is|appears|seems|contains|has)\b` +
+	`|\b(?:there are|i (?:see|found|don'?t see|couldn'?t find)) (?:no|\d+|several|some) (?:files|folders|directories|entries)\b` +
+	`|\b(?:no|empty) (?:files|repository|repo|directory|folder) (?:were |was |is )?(?:found|available|present|detected)\b` +
+	`|\bunable to (?:locate|find|detect) (?:a |the |any )?(?:repository|repo|project|files)\b`)
+
 const enforceNudge = `STOP. You DO have tools and you MUST use them. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
+
+You have NO sandbox and NO /mnt/data here. Anything you "inspected" without a tool result in this conversation was imagined. The developer's repository is on their machine; look at it with the tools (e.g. glob/list/read/bash) — nothing else counts.
 
 Emit the tool_call block(s) now, e.g.:
 
@@ -41,5 +54,5 @@ func needsNudge(reply string, toolsOffered bool, calls int) bool {
 	if r == "" {
 		return true
 	}
-	return refusalTells.MatchString(r)
+	return refusalTells.MatchString(r) || hallucinationTells.MatchString(r)
 }

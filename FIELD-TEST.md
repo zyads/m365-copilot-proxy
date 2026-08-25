@@ -46,27 +46,28 @@ Write all evidence to `./field-test/` inside the repo (gitignored by default).
 
 ---
 
-## 0. Build
+## 0. Install (builds + installs the persistent service + launcher)
 
 ```sh
-git clone https://github.com/zyads/m365-copilot-proxy && cd m365-copilot-proxy
-git log --oneline -1                       # record the commit in the report
-go version
-go test ./... && go build -o m365-copilot-proxy .
-mkdir -p field-test
+curl -fsSL https://raw.githubusercontent.com/zyads/m365-copilot-proxy/main/install.sh | bash
+# it asks for M365_TENANT_ID / M365_CLIENT_ID once (stored 0600, never in evidence files)
+cd ~/.m365-copilot-proxy && git log --oneline -1 && go version   # record both in the report
+go test ./... && mkdir -p field-test
+echo "DEBUG_DIR=$HOME/.m365-copilot-proxy/field-test/turns" >> ~/.config/m365-copilot-proxy/env
+copilot-proxy restart
 ```
-Pass: `ok` from tests, binary present. Fail: paste the full build/test output.
+Pass: tests `ok`, `copilot-proxy status` prints `running`. Fail: paste the
+install/test output.
 
 ## 1. Auth (device code)
 
 ```sh
-export M365_TENANT_ID=…  M365_CLIENT_ID=…
-export DEBUG_DIR=$PWD/field-test/turns
-./m365-copilot-proxy 2>&1 | tee field-test/proxy.log &
+copilot-proxy auth        # or just: opencode-copilot (it prints the code and waits)
 ```
-Expected within ~5s: a `=== Microsoft sign-in required ===` block with a
-URL + code. Hand the URL/code to the user and wait. Then expect
-`=== Signed in. Token cached. ===` and `m365-copilot-proxy on http://127.0.0.1:8080 …`.
+Expected: JSON with `"pending":{"message":"To sign in, use a web browser…","user_code":"…"}`.
+Hand the URL/code to the user and wait; `copilot-proxy auth` should then show
+`"authenticated":true`. Logs: `copilot-proxy logs` (Ctrl-C to stop);
+save a redacted head with `copilot-proxy logs 2>&1 | head -200 > field-test/proxy.log`.
 
 Failure modes and what to capture:
 - `AADSTS7000218` → app is confidential; rerun with `M365_CLIENT_SECRET=…`.
@@ -77,7 +78,7 @@ Failure modes and what to capture:
 - `Allow public client flows` mentioned anywhere → tell the user to enable it on the app registration (Authentication → Advanced).
 Capture: the exact `AADSTS…` code and message.
 
-Also note the **probe line** in the log — one of:
+Also note the **probe line** in the log (`copilot-proxy logs`) — one of:
 `probe: … no model/reasoning selector exposed`, `probe: POSSIBLE MODEL KNOBS …`, or `probe: $metadata unavailable`. Copy it verbatim into the report.
 
 ## 2. First real Graph call (the big unknown)

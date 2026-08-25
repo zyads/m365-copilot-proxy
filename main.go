@@ -246,6 +246,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// --- Translate reply: prose and/or tool calls; repair, enforce, re-prompt. ---
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	toolsOffered := len(req.Tools) > 0
+	if !s.cfg.Sources {
+		sources = ""
+		text = stripCitations(text)
+	}
 	var reasoning string
 	if s.cfg.Thinking {
 		reasoning, text = splitThinking(text)
@@ -271,6 +275,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.stats.Nudges.Add(1)
 			if t2, s2, err2 := s.graph.Send(ctx, convID, nudge, contexts); err2 == nil {
 				r2think := ""
+				if !s.cfg.Sources {
+					s2 = ""
+					t2 = stripCitations(t2)
+				}
 				if s.cfg.Thinking {
 					r2think, t2 = splitThinking(t2)
 				}

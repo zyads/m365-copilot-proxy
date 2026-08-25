@@ -16,6 +16,16 @@ Copilot never touches your files; OpenCode's own local tools do. Copilot is
 just the brain. That's how it "understands the repo" — the same way every
 agent does: by reading it.
 
+## No "Microslop" (field-tested)
+Copilot grounds on Teams/mail/SharePoint whenever a prompt sounds like
+history ("continue where we left off") and decorates answers with `[1]`
+citations and a "Sources:" list. The Graph API has no switch for that, so:
+persona + protocol forbid it and define "where we left off" as *git status,
+git log, AGENTS.md/TODO/NOTES, todoread* — tools first, then act; replies
+that lean on "records", "Teams", "enterprise sources" get the tool nudge;
+and all attributions/citations are stripped from replies (`SOURCES=on` to
+keep them). Tool-call blocks and code indices like `arr[0]` are untouched.
+
 ## Where the instructions go (field-tested)
 Copilot treats Graph `contexts[]` as reference documents — it read OpenCode's
 skills list from there but never "saw" the tool protocol sent the same way.

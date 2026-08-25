@@ -30,7 +30,11 @@ var hallucinationTells = regexp.MustCompile(`(?i)` +
 	`|\b(?:the )?(?:current |working )?directory (?:is|appears|seems|contains|has)\b` +
 	`|\b(?:there are|i (?:see|found|don'?t see|couldn'?t find)) (?:no|\d+|several|some) (?:files|folders|directories|entries)\b` +
 	`|\b(?:no|empty) (?:files|repository|repo|directory|folder) (?:were |was |is )?(?:found|available|present|detected)\b` +
-	`|\bunable to (?:locate|find|detect) (?:a |the |any )?(?:repository|repo|project|files)\b`)
+	`|\bunable to (?:locate|find|detect) (?:a |the |any )?(?:repository|repo|project|files)\b` +
+	`|\bfrom (?:the )?(?:records|our (?:chat|messages|conversation|exchange|thread))\b|\benterprise (?:sources?|search|data)\b` +
+	`|\b(?:in|from|via|searched|searching) (?:teams|sharepoint|onedrive|outlook|your (?:mailbox|email|inbox|calendar))\b` +
+	`|\b(?:based on|according to) (?:the )?(?:teams|chat|meeting|email) (?:messages?|history|transcripts?|threads?)\b` +
+	`|\bcannot (?:determine|tell|know|confirm) [^.\n]{0,60}\b(?:from|without) (?:the )?(?:records|chat|conversation|messages)\b`)
 
 const enforceNudge = `STOP. You DO have tools and you MUST use them. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
 

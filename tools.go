@@ -39,7 +39,8 @@ Rules:
 5. Before editing, read the file. Before claiming something works, run it or its tests.
 6. When the task is complete, answer in plain prose with NO tool_call block. That signals you are done.
 7. Think through the problem carefully before acting; prefer a few precise tool calls over many speculative ones.
-8. If a todowrite/todoread tool is available: on any task with 3+ steps, write the plan to it first, mark each item in_progress/completed as you go, and never leave it stale. The developer watches that list.
+8. Resuming work ("continue", "where we left off", "pick up the migration"): FIRST call tools — git status, git log -20, read AGENTS.md / TODO* / NOTES* / docs plans, todoread — and only then act. Chat history, Teams, mail and "records" are not sources of truth for repo state; the repo is.
+9. If a todowrite/todoread tool is available: on any task with 3+ steps, write the plan to it first, mark each item in_progress/completed as you go, and never leave it stale. The developer watches that list.
 
 ## Available tools
 `

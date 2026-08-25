@@ -267,3 +267,31 @@ func TestUtilityTitleRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestStripCitations(t *testing.T) {
+	in := "The migration is half done [1][2]. Next step is BUILD files [3].\n\n**Sources:**\n1. Teams message from Someone\n2. https://contoso.sharepoint.com/x\n"
+	want := "The migration is half done. Next step is BUILD files."
+	if got := stripCitations(in); got != want {
+		t.Errorf("got %q", got)
+	}
+	keep := "```tool_call\n{\"name\":\"read\",\"arguments\":{\"path\":\"a[1].go\"}}\n```"
+	if got := stripCitations(keep); got != keep {
+		t.Errorf("tool block mangled: %q", got)
+	}
+	if got := stripCitations("arr[0] and list[12] in code"); got != "arr[0] and list[12] in code" {
+		t.Errorf("code indices mangled: %q", got)
+	}
+}
+
+func TestEnterpriseGroundingTells(t *testing.T) {
+	for _, txt := range []string{
+		"I can't determine the current failure set from records alone.",
+		"Based on the Teams messages, the rollout stalled in March.",
+		"Searching enterprise sources, I found a related SharePoint doc.",
+		"From our conversation I don't see any migration details.",
+	} {
+		if !needsNudge(txt, true, 0) {
+			t.Errorf("should nudge: %q", txt)
+		}
+	}
+}

@@ -232,7 +232,7 @@ var requiredScopesRe = regexp.MustCompile(`Required scopes\s*=\s*\[([^\]]+)\]`)
 // errTooLarge tells the server to shrink the prompt and try again.
 var errTooLarge = errors.New("graph chat: message too large")
 
-var tooLargeRe = regexp.MustCompile(`(?i)too (?:long|large)|exceed|length|payload|limit|maximum`)
+var tooLargeRe = regexp.MustCompile(`(?i)too (?:long|large|big)|exceed(?:s|ed)? (?:the )?(?:maximum |max )?(?:allowed )?(?:length|size|character)|(?:payload|request entity|message|text|content) (?:is )?too|maximum (?:length|size|characters?)|character limit|length limit|size limit`)
 
 func isTooLarge(status int, body []byte) bool {
 	return status == 413 || (status == 400 && tooLargeRe.Match(body))

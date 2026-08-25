@@ -12,9 +12,9 @@ import (
 )
 
 type Stats struct {
-	Turns, ToolCalls, Nudges, Repairs, RepairFailures, NewConvs, ReusedConvs, Errors, Shrinks atomic.Int64
-	mu                                                                                        sync.Mutex
-	lat                                                                                       []time.Duration
+	Turns, ToolCalls, Nudges, Repairs, RepairFailures, NewConvs, ReusedConvs, Errors, Shrinks, Replays atomic.Int64
+	mu                                                                                                 sync.Mutex
+	lat                                                                                                []time.Duration
 }
 
 func (s *Stats) observe(d time.Duration) {
@@ -43,7 +43,7 @@ func (s *Stats) handler(w http.ResponseWriter, _ *http.Request) {
 		"turns": s.Turns.Load(), "tool_calls": s.ToolCalls.Load(),
 		"nudges": s.Nudges.Load(), "arg_repairs": s.Repairs.Load(), "arg_repair_failures": s.RepairFailures.Load(),
 		"conversations_new": s.NewConvs.Load(), "conversations_reused": s.ReusedConvs.Load(),
-		"message_shrinks": s.Shrinks.Load(), "errors": s.Errors.Load(),
+		"message_shrinks": s.Shrinks.Load(), "conversation_replays": s.Replays.Load(), "errors": s.Errors.Load(),
 		"latency_p50_ms": p50.Milliseconds(), "latency_p95_ms": p95.Milliseconds(),
 	})
 }

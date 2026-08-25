@@ -162,6 +162,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Send, shrinking the tool-result budget if Graph says "too large". ---
+	// If a REUSED conversation errors for any other reason (undocumented turn
+	// cap, expired server-side, etc.), drop it, open a fresh one, and replay
+	// the folded history so a long agent task doesn't die mid-flight.
 	started := time.Now()
 	budget := s.cfg.ToolResultMax
 	var prompt, text, sources string
@@ -169,12 +172,36 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	for attempt := 0; ; attempt++ {
 		prompt = render(budget)
 		text, sources, err = s.graph.Send(ctx, convID, prompt, contexts)
-		if err == nil || !errors.Is(err, errTooLarge) || attempt >= 3 {
+		if err == nil || attempt >= 3 {
 			break
 		}
-		budget /= 2
-		s.stats.Shrinks.Add(1)
-		log.Printf("chat: message too large — retrying with tool-result budget %d", budget)
+		if errors.Is(err, errTooLarge) {
+			budget /= 2
+			s.stats.Shrinks.Add(1)
+			log.Printf("chat: message too large — retrying with tool-result budget %d", budget)
+			continue
+		}
+		if reuse {
+			log.Printf("chat: reused conversation %s failed (%v) — replaying into a fresh one", shortID(convID), err)
+			unlock()
+			id, nerr := s.graph.NewConversation(ctx)
+			if nerr != nil {
+				err = nerr
+				break
+			}
+			convID, reuse = id, false
+			unlock = s.lockConv(convID)
+			s.stats.NewConvs.Add(1)
+			s.stats.Replays.Add(1)
+			// Fresh conversation needs the full tool catalog, not the reminder.
+			for i := range contexts {
+				if strings.HasPrefix(contexts[i].Description, "Tool-calling protocol") && len(req.Tools) > 0 {
+					contexts[i].Text = toolProtocol + renderToolCatalog(req.Tools)
+				}
+			}
+			continue
+		}
+		break
 	}
 	if err != nil {
 		s.fail(w, err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,57 @@ func TestThinkingSurfacedAsReasoning(t *testing.T) {
 	ri, ti := strings.Index(body, `"reasoning_content":"list first`), strings.Index(body, `"tool_calls"`)
 	if ri < 0 || ti < 0 || ri > ti {
 		t.Errorf("stream order wrong: reasoning@%d tool_calls@%d", ri, ti)
+	}
+}
+
+// Reused conversation hits an (undocumented) turn cap → proxy opens a new
+// conversation, replays history with the full tool catalog, and succeeds.
+func TestReplayOnDeadConversation(t *testing.T) {
+	chats := 0
+	var convs []string
+	var lastCtx []graphContext
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/copilot/conversations":
+			id := "conv-" + string(rune('A'+len(convs)))
+			convs = append(convs, id)
+			w.Write([]byte(`{"id":"` + id + `"}`))
+		case strings.HasSuffix(r.URL.Path, "/chat"):
+			chats++
+			var body struct {
+				Contexts []graphContext `json:"contexts"`
+			}
+			b, _ := io.ReadAll(r.Body)
+			json.Unmarshal(b, &body)
+			lastCtx = body.Contexts
+			if strings.Contains(r.URL.Path, "conv-A") && chats == 2 {
+				w.WriteHeader(400)
+				w.Write([]byte(`{"error":{"code":"BadRequest","message":"Conversation has reached the maximum number of turns"}}`))
+				return
+			}
+			w.Write([]byte(`{"id":"x","messages":[{"id":"m","text":"ok"}]}`))
+		}
+	}))
+	defer srv.Close()
+	p := newProxy(t, srv.URL)
+	defer p.Close()
+	// Turn 1 → conv-A.
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"t1"}]}`)
+	if len(convs) != 1 || string(out.Choices[0].Message.Content) != "ok" {
+		t.Fatalf("turn1: convs=%v", convs)
+	}
+	// Turn 2 reuses conv-A, which now 400s ("maximum turns") → replay into conv-B.
+	_, out = post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"t1"},{"role":"assistant","content":"ok"},{"role":"user","content":"t2"}]}`)
+	if len(convs) != 2 || string(out.Choices[0].Message.Content) != "ok" {
+		t.Fatalf("replay failed: convs=%v out=%+v", convs, out)
+	}
+	if last := lastCtx[len(lastCtx)-1].Text; !strings.Contains(last, "### read") {
+		t.Errorf("replay should carry the full tool catalog, got: %.80q", last)
+	}
+	resp, _ := http.Get(p.URL + "/stats")
+	var st map[string]any
+	json.NewDecoder(resp.Body).Decode(&st)
+	if st["conversation_replays"].(float64) != 1 {
+		t.Errorf("stats: %v", st)
 	}
 }

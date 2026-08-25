@@ -134,6 +134,12 @@ func (g *GraphClient) NewConversation(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if status/100 != 2 {
+		if status == 403 {
+			if m := requiredScopesRe.FindSubmatch(b); m != nil {
+				return "", fmt.Errorf("Copilot Chat API refused: the app registration must have these DELEGATED Graph permissions admin-consented (all of them, even for plain chat): %s — then sign in again to get a token that carries them", string(m[1]))
+			}
+			return "", fmt.Errorf("graph create conversation: HTTP 403 (missing scopes or no Copilot license for this user): %s", truncate(b, 600))
+		}
 		return "", fmt.Errorf("graph create conversation: HTTP %d: %s", status, truncate(b, 600))
 	}
 	var conv struct {
@@ -219,6 +225,9 @@ func (g *GraphClient) Probe(ctx context.Context) {
 	}
 	log.Printf("probe: POSSIBLE MODEL KNOBS in Graph schema: %s  → try GRAPH_EXTRA_BODY", strings.Join(hits, ", "))
 }
+
+// Graph's 403 for the Copilot API names the scopes it wants; surface them.
+var requiredScopesRe = regexp.MustCompile(`Required scopes\s*=\s*\[([^\]]+)\]`)
 
 // errTooLarge tells the server to shrink the prompt and try again.
 var errTooLarge = errors.New("graph chat: message too large")

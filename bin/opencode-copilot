@@ -35,6 +35,10 @@ for _ in $(seq 1 900); do
   msg=$(echo "$st" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
   if [ -n "$msg" ] && [ "$msg" != "$shown" ]; then
     echo; echo "=== Microsoft sign-in required ==="; echo "$msg"; echo; shown="$msg"
+    # Browser mode: open the login URL for them.
+    if echo "$msg" | grep -q '/auth/login'; then
+      (xdg-open "$URL/auth/login" 2>/dev/null || open "$URL/auth/login" 2>/dev/null || true) &
+    fi
   fi
   if echo "$st" | grep -q '"last_error"' && [ -z "$msg" ]; then
     echo "sign-in error: $(echo "$st" | sed -n 's/.*"last_error":"\([^"]*\)".*/\1/p')" >&2

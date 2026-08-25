@@ -53,6 +53,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("/stats", s.stats.handler)
 	mux.HandleFunc("/auth", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, s.auth.Status()) })
+	mux.HandleFunc("/auth/login", s.auth.loginHandler)
+	mux.HandleFunc("/auth/callback", s.auth.callbackHandler)
+	mux.HandleFunc("/auth/seed", s.auth.seedHandler)
 	mux.HandleFunc("/update", s.upd.handler)
 	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
 		local, _, _, _ := s.upd.Check()
@@ -345,6 +348,10 @@ func callNames(calls []parsedCall) string {
 		names[i] = c.Name
 	}
 	return strings.Join(names, ",")
+}
+
+func decodeJSON(r *http.Request, v any) error {
+	return json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v)
 }
 
 func sprintf(format string, a ...any) string { return fmt.Sprintf(format, a...) }

@@ -94,11 +94,25 @@ Copilot has no reasoning tokens, so the proxy asks it to think inside
 reasoning — the answer/tool calls stay clean. Planning before acting also
 measurably improves protocol adherence. `THINKING=off` to disable.
 
-## Entra app registration — what you actually need
-- Delegated Graph permissions consented (you already have this).
-- **Authentication → Advanced settings → Allow public client flows: Yes.**
-  Device code flow needs this. No client secret. No application permissions.
-- The signed-in user needs an M365 Copilot license.
+## Entra app registration — what you actually need (field-verified)
+**Delegated permissions, admin-consented — all of them, even for plain chat**
+(Graph's 403 names this exact list; see `docs/field-test-2026-08-25-enterprise.md`):
+`Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`,
+`Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`.
+The proxy rewrites that 403 into a plain-English message listing them.
+
+The signed-in user needs an M365 Copilot license. No application permissions.
+
+**Three ways to get a token — pick by what your tenant allows:**
+
+| `AUTH_MODE` | App registration needs | When |
+|---|---|---|
+| `device_code` (default) | Authentication → Advanced → *Allow public client flows: Yes* | simplest; **often blocked by Conditional Access** ("sign-in was successful but does not meet the criteria") |
+| `browser` | Redirect URI `http://localhost:8080/auth/callback` (platform *Mobile and desktop*, or *Web* for confidential apps) | CAP-friendly — the same auth-code+PKCE flow every desktop app uses. `copilot-proxy login` opens it; the launcher does too. |
+| any + `copilot-proxy seed-token` | nothing | you already hold a delegated refresh token for this app from another flow; paste it once, the proxy refreshes from it forever |
+
+Confidential app (has a secret)? Set `M365_CLIENT_SECRET`; it's sent on every
+token call including refreshes.
 
 ## Run
 ```sh

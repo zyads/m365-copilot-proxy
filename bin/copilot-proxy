@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# copilot-proxy — control the persistent proxy: status | start | restart | stop | logs | update | auth
+# copilot-proxy — control the persistent proxy: status | start | restart | stop | logs | update | auth | login | seed-token
 set -euo pipefail
 INSTALL_DIR="${M365_PROXY_DIR:-$HOME/.m365-copilot-proxy}"
 CONF_DIR="$HOME/.config/m365-copilot-proxy"
@@ -42,5 +42,11 @@ case "${1:-status}" in
     else tail -f "$CONF_DIR/logs/proxy.log"; fi ;;
   update)  curl -s -X POST "$URL/update"; echo ;;
   auth)    curl -s "$URL/auth"; echo ;;
-  *) echo "usage: copilot-proxy status|start|restart|stop|logs|update|auth" >&2; exit 1 ;;
+  login)   (xdg-open "$URL/auth/login" 2>/dev/null || open "$URL/auth/login" 2>/dev/null || echo "open $URL/auth/login") ;;
+  seed-token)
+    # Bootstrap from a refresh token obtained elsewhere (CAP workaround).
+    # Reads from stdin so the token never lands in shell history.
+    echo "paste refresh token, then Enter:" >&2; IFS= read -r rt
+    printf '{"refresh_token":"%s"}' "$rt" | curl -s -X POST "$URL/auth/seed" -H 'content-type: application/json' -d @-; echo ;;
+  *) echo "usage: copilot-proxy status|start|restart|stop|logs|update|auth|login|seed-token" >&2; exit 1 ;;
 esac

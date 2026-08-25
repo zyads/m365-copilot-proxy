@@ -44,6 +44,25 @@ type Authenticator struct {
 	pmu     sync.Mutex
 	pending *pendingAuth
 	lastErr string
+
+	bmu     sync.Mutex
+	browser *browserAuth
+}
+
+func (a *Authenticator) setErr(s string) {
+	a.pmu.Lock()
+	a.lastErr = s
+	a.pmu.Unlock()
+}
+
+func (a *Authenticator) setPendingBrowser() {
+	a.pmu.Lock()
+	a.pending = &pendingAuth{
+		Message:         "To sign in, open http://localhost:" + a.cfg.listenPort() + "/auth/login in your browser.",
+		VerificationURI: "http://localhost:" + a.cfg.listenPort() + "/auth/login",
+		ExpiresAt:       time.Now().Add(24 * time.Hour),
+	}
+	a.pmu.Unlock()
 }
 
 type pendingAuth struct {
@@ -62,6 +81,9 @@ func (a *Authenticator) Status() map[string]any {
 	a.pmu.Lock()
 	defer a.pmu.Unlock()
 	out := map[string]any{"authenticated": ok || hasRT, "mode": a.cfg.AuthMode}
+	if ok || hasRT {
+		a.pending = nil
+	}
 	if a.pending != nil && time.Now().Before(a.pending.ExpiresAt) {
 		out["pending"] = a.pending
 	}
@@ -108,6 +130,10 @@ func (a *Authenticator) Token(ctx context.Context) (string, error) {
 		ts  *tokenSet
 		err error
 	)
+	interactive := a.deviceCode
+	if a.cfg.AuthMode == "browser" {
+		interactive = a.browserPending
+	}
 	switch a.cfg.AuthMode {
 	case "client_credentials":
 		ts, err = a.clientCredentials(ctx)
@@ -115,11 +141,11 @@ func (a *Authenticator) Token(ctx context.Context) (string, error) {
 		if a.tok != nil && a.tok.RefreshToken != "" {
 			ts, err = a.refresh(ctx, a.tok.RefreshToken)
 			if err != nil {
-				log.Printf("auth: refresh failed (%v); falling back to device code", err)
-				ts, err = a.deviceCode(ctx)
+				log.Printf("auth: refresh failed (%v); interactive sign-in needed", err)
+				ts, err = interactive(ctx)
 			}
 		} else {
-			ts, err = a.deviceCode(ctx)
+			ts, err = interactive(ctx)
 		}
 	}
 	if err != nil {

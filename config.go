@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,7 +14,7 @@ type Config struct {
 	TenantID     string // Entra ID tenant (GUID or "organizations")
 	ClientID     string // App registration (public client for device code)
 	ClientSecret string // optional; confidential clients need it on every token call
-	AuthMode     string // "device_code" (default) | "client_credentials"
+	AuthMode     string // "device_code" (default) | "browser" (auth-code+PKCE, CAP-friendly) | "client_credentials"
 	Scopes       string // space-separated delegated scopes
 	TokenCache   string // path of the refresh-token cache file
 
@@ -37,6 +38,14 @@ type Config struct {
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
 	MaxRetries     int
+}
+
+// listenPort extracts the port from Listen ("127.0.0.1:8080" -> "8080").
+func (c Config) listenPort() string {
+	if i := strings.LastIndex(c.Listen, ":"); i >= 0 {
+		return c.Listen[i+1:]
+	}
+	return "8080"
 }
 
 func env(key, def string) string {

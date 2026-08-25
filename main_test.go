@@ -319,3 +319,29 @@ func TestNudgeOnSandboxHallucination(t *testing.T) {
 		}
 	}
 }
+
+// Fresh conversation, tools offered, "what's this repo about" answered with
+// confident prose and no tool call → nudged even though no tell matched.
+func TestFirstTurnTaskNudge(t *testing.T) {
+	n := 0
+	g := newFakeGraph(t, func(p string) string {
+		n++
+		if strings.Contains(p, "STOP. You DO have tools") {
+			return "```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}\n```"
+		}
+		return "This repository is a Go web service with a clean architecture."
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"what is this repo about?"}]}`)
+	if *out.Choices[0].FinishReason != "tool_calls" || n != 2 {
+		t.Fatalf("first-turn nudge: finish=%s sends=%d", *out.Choices[0].FinishReason, n)
+	}
+	// A greeting must not be nudged.
+	n = 0
+	_, out = post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"hey"}]}`)
+	if n != 1 || *out.Choices[0].FinishReason != "stop" {
+		t.Fatalf("greeting nudged: sends=%d", n)
+	}
+}

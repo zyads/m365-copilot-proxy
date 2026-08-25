@@ -44,6 +44,16 @@ Emit the tool_call block(s) now, e.g.:
 
 Output only tool_call blocks in this reply.`
 
+// taskShaped: a first message that cannot be answered honestly without
+// looking at the repo. Used only on fresh conversations.
+var taskShaped = regexp.MustCompile(`(?i)\b(?:repo|repository|codebase|project|code|file|files|directory|folder|function|class|module|test|tests|bug|error|build|compile|implement|refactor|fix|add|change|update|explain|what does|what is this|how does|where is|this|here)\b`)
+
+// firstTurnNeedsNudge: fresh conversation + tools offered + task-shaped ask
+// + no tool call = the model answered from nothing.
+func firstTurnNeedsNudge(userMsg string, toolsOffered bool, calls int) bool {
+	return toolsOffered && calls == 0 && len(strings.TrimSpace(userMsg)) > 0 && taskShaped.MatchString(userMsg)
+}
+
 // needsNudge reports whether a tool-less reply looks like a refusal or a
 // narrated non-action when tools were available.
 func needsNudge(reply string, toolsOffered bool, calls int) bool {

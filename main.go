@@ -201,6 +201,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		case needsNudge(text, true, len(calls)):
 			nudge = enforceNudge
 			log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
+		case !reuse && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
+			nudge = enforceNudge
+			log.Printf("chat: first turn answered a task without any tool call — nudging once")
 		}
 		if nudge != "" {
 			s.stats.Nudges.Add(1)
@@ -348,6 +351,15 @@ func callNames(calls []parsedCall) string {
 		names[i] = c.Name
 	}
 	return strings.Join(names, ",")
+}
+
+func lastUserMessage(msgs []oaiMessage) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return string(msgs[i].Content)
+		}
+	}
+	return ""
 }
 
 func decodeJSON(r *http.Request, v any) error {

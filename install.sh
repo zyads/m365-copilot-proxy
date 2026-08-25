@@ -55,6 +55,11 @@ if [ ! -f "$ENV_FILE" ]; then
   chmod 600 "$ENV_FILE"
 fi
 grep -q '^REPO_DIR=' "$ENV_FILE" || echo "REPO_DIR=$INSTALL_DIR" >> "$ENV_FILE"
+# Service managers start the proxy with a bare PATH; self-update needs go.
+GO_BIN_DIR="$(dirname "$(command -v go)")"
+if grep -q '^GO_BIN=' "$ENV_FILE"; then sed -i.bak "s#^GO_BIN=.*#GO_BIN=$GO_BIN_DIR#" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+else echo "GO_BIN=$GO_BIN_DIR" >> "$ENV_FILE"; fi
+grep -q '^PATH=' "$ENV_FILE" || echo "PATH=$GO_BIN_DIR:$HOME/go/bin:/usr/local/bin:/usr/bin:/bin" >> "$ENV_FILE"
 
 # --- launcher + control script ---------------------------------------------
 install -m 755 "$INSTALL_DIR/bin/opencode-copilot" "$BIN_DIR/opencode-copilot"

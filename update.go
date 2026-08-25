@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,8 +75,14 @@ func (u *Updater) Apply() (updated bool, err error) {
 		return false, errorf("git pull: %s", out)
 	}
 	tmp := u.exe + ".new"
-	build := exec.Command("go", "build", "-o", tmp, ".")
+	goBin, err := findGo()
+	if err != nil {
+		return false, errorf("%v (set GO_BIN=/path/to/go/bin in the env file)", err)
+	}
+	build := exec.Command(goBin, "build", "-o", tmp, ".")
 	build.Dir = u.repo
+	// Make sure the toolchain can find itself even under a bare service PATH.
+	build.Env = append(os.Environ(), "PATH="+filepath.Dir(goBin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if out, err := build.CombinedOutput(); err != nil {
 		_ = os.Remove(tmp)
 		// Roll the checkout back so the next attempt is clean.
@@ -145,6 +152,46 @@ func (u *Updater) handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, resp)
+}
+
+// findGo locates the go binary for self-update. Service managers (systemd,
+// launchd, setsid/nohup) often start us with a bare PATH that lacks it.
+// Order: GO_BIN env → PATH → GOROOT of the running binary → well-known dirs.
+func findGo() (string, error) {
+	exe := "go"
+	if runtime.GOOS == "windows" {
+		exe = "go.exe"
+	}
+	if d := os.Getenv("GO_BIN"); d != "" {
+		for _, c := range []string{d, filepath.Join(d, exe)} {
+			if isExec(c) {
+				return c, nil
+			}
+		}
+	}
+	if p, err := exec.LookPath("go"); err == nil {
+		return p, nil
+	}
+	if gr := runtime.GOROOT(); gr != "" && isExec(filepath.Join(gr, "bin", exe)) {
+		return filepath.Join(gr, "bin", exe), nil
+	}
+	home, _ := os.UserHomeDir()
+	for _, d := range []string{
+		"/usr/local/go/bin", "/usr/lib/go/bin", "/usr/lib/go-1.22/bin", "/usr/lib/go-1.23/bin", "/usr/lib/go-1.24/bin",
+		"/opt/homebrew/bin", "/usr/local/bin", "/snap/bin", "/usr/bin",
+		filepath.Join(home, "go", "bin"), filepath.Join(home, ".go", "bin"), filepath.Join(home, "sdk"),
+		`C:\Program Files\Go\bin`, `C:\Go\bin`,
+	} {
+		if isExec(filepath.Join(d, exe)) {
+			return filepath.Join(d, exe), nil
+		}
+	}
+	return "", errorf("go toolchain not found on PATH, GOROOT, or common install dirs")
+}
+
+func isExec(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir() && (runtime.GOOS == "windows" || st.Mode()&0o111 != 0)
 }
 
 func short(s string) string {

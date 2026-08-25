@@ -295,3 +295,30 @@ func TestEnterpriseGroundingTells(t *testing.T) {
 		}
 	}
 }
+
+func TestToolNameResolutionAndMention(t *testing.T) {
+	known := map[string]bool{"local-memory_search": true, "local-memory_store": true, "read": true, "todoread": true}
+	for in, want := range map[string]string{
+		"local-memory.search": "local-memory_search",
+		"Local_Memory_Search": "local-memory_search",
+		"search":              "local-memory_search",
+		"store":               "local-memory_store",
+		"memory":              "", // ambiguous
+		"nope":                "",
+	} {
+		if got := resolveToolName(in, known); got != want {
+			t.Errorf("resolve(%q)=%q want %q", in, got, want)
+		}
+	}
+	_, calls, problems, repaired := extractToolCallsChecked("```tool_call\n{\"name\":\"local-memory.search\",\"arguments\":{\"q\":\"plan\"}}\n```", known, nil)
+	if len(calls) != 1 || calls[0].Name != "local-memory_search" || repaired != 1 || len(problems) != 0 {
+		t.Errorf("mangled name not resolved: %+v %v", calls, problems)
+	}
+	got := mentionedTools("use local-memory to recall the plan, and check todoread", known)
+	if strings.Join(got, ",") != "local-memory_search,local-memory_store,todoread" {
+		t.Errorf("mentioned = %v", got)
+	}
+	if m := mentionedButUncalled("check todoread", known, []parsedCall{{Name: "todoread"}}); len(m) != 0 {
+		t.Errorf("called tool flagged: %v", m)
+	}
+}

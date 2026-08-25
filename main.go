@@ -118,8 +118,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if system != "" {
 		instr = append(instr, graphContext{Description: "System instructions from the calling application. Follow them.", Text: system})
 	}
+	root := detectRoot(s.cfg, system)
 	if s.cfg.RepoMap && !utility {
-		if rc := s.repo.Context(detectRoot(s.cfg, system)); rc != nil {
+		if rc := s.repo.Context(root); rc != nil {
 			instr = append(instr, *rc)
 		}
 	}
@@ -153,7 +154,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	toolInstr := func(fresh bool) graphContext {
 		text := toolProtocol + renderToolCatalog(req.Tools)
 		if !fresh {
-			text = renderToolReminder(req.Tools)
+			text = renderToolReminder(req.Tools, root)
 		}
 		return graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text}
 	}
@@ -265,11 +266,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.stats.RepairFailures.Add(1)
 			log.Printf("chat: invalid tool args (%s) — re-prompting", strings.Join(problems, "; "))
 		case needsNudge(text, true, len(calls)):
-			nudge = enforceNudge
+			nudge = enforceNudgeFor(root)
 			log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
 		case !reuse && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
-			nudge = enforceNudge
+			nudge = enforceNudgeFor(root)
 			log.Printf("chat: first turn answered a task without any tool call — nudging once")
+		case len(mentionedButUncalled(lastUserMessage(turns), known, calls)) > 0:
+			m := mentionedButUncalled(lastUserMessage(turns), known, calls)
+			nudge = mentionNudge(m)
+			log.Printf("chat: user named tool(s) %v, reply didn't call them — nudging once", m)
 		}
 		if nudge != "" {
 			s.stats.Nudges.Add(1)
@@ -441,6 +446,27 @@ func renderInstructions(instr []graphContext) string {
 	}
 	sb.WriteString("=== END INSTRUCTIONS ===\n\n=== CONVERSATION ===\n")
 	return sb.String()
+}
+
+// mentionedButUncalled: tools the user named in their last message that the
+// reply did not call. Only counts the LAST user message (a fresh ask), and
+// only when the last message is from the user (not mid tool-loop).
+func mentionedButUncalled(userMsg string, known map[string]bool, calls []parsedCall) []string {
+	want := mentionedTools(userMsg, known)
+	if len(want) == 0 {
+		return nil
+	}
+	called := map[string]bool{}
+	for _, c := range calls {
+		called[c.Name] = true
+	}
+	var out []string
+	for _, w := range want {
+		if !called[w] {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func lastUserMessage(msgs []oaiMessage) string {

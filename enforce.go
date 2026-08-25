@@ -34,7 +34,21 @@ var hallucinationTells = regexp.MustCompile(`(?i)` +
 	`|\bfrom (?:the )?(?:records|our (?:chat|messages|conversation|exchange|thread))\b|\benterprise (?:sources?|search|data)\b` +
 	`|\b(?:in|from|via|searched|searching) (?:teams|sharepoint|onedrive|outlook|your (?:mailbox|email|inbox|calendar))\b` +
 	`|\b(?:based on|according to) (?:the )?(?:teams|chat|meeting|email) (?:messages?|history|transcripts?|threads?)\b` +
-	`|\bcannot (?:determine|tell|know|confirm) [^.\n]{0,60}\b(?:from|without) (?:the )?(?:records|chat|conversation|messages)\b`)
+	`|\b(?:cannot|can'?t|unable to|no way to) (?:determine|tell|know|confirm|see|find|identify|reconstruct) [^.\n]{0,80}\b(?:from|without|using) (?:the |this |our )?(?:records|chat|conversation|messages|history|context|exchange)\b` +
+	`|\b(?:chat|conversation|message) history (?:alone|only)\b|\bfrom (?:the |this )?(?:chat|conversation) (?:history|alone)\b` +
+	// Asking the developer for something the tools can fetch.
+	`|\b(?:give|provide|tell|share|send|paste|point) me (?:the |a |your )?(?:exact )?(?:repo(?:sitory)?|path|branch|directory|folder|file|url|name|location)\b` +
+	`|\b(?:which|what) (?:repo(?:sitory)?|directory|folder|branch|path) (?:are you|is (?:it|this)|should i|do you)\b` +
+	`|\b(?:once|if|when) you (?:give|provide|tell|share|send|point) me\b`)
+
+// enforceNudgeFor names the repo root when known — the model most often
+// refuses because it has lost track of WHERE it is.
+func enforceNudgeFor(root string) string {
+	if root == "" {
+		return enforceNudge
+	}
+	return enforceNudge + "\n\nThe repository is at " + root + " — that is the working directory. Do NOT ask for a path or branch. Call bash with `git status && git log --oneline -15` right now, then continue."
+}
 
 const enforceNudge = `STOP. You DO have tools and you MUST use them. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
 

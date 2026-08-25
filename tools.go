@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -69,18 +70,28 @@ func renderToolCatalog(tools []oaiTool) string {
 	return sb.String()
 }
 
-// renderToolReminder is the per-turn context on a reused conversation: the
-// protocol rules plus tool names only. Keeps every turn small even with
-// dozens of MCP tools attached.
-func renderToolReminder(tools []oaiTool) string {
+// renderToolReminder is the per-turn "standing orders" on a reused
+// conversation. Field-tested: Copilot's server-side persona reasserts over
+// turns and it forgets where it is, so every turn restates who it is, the
+// sandbox/M365 ban, the protocol, the tool names, and the working directory.
+// Still small (<1 KB) even with dozens of MCP tools attached.
+func renderToolReminder(tools []oaiTool, root string) string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		if t.Type == "function" {
 			names = append(names, t.Function.Name)
 		}
 	}
-	return "Tool-call protocol still applies (```tool_call fenced JSON, one object per block; plain prose when done). " +
-		"Tools available (definitions were given earlier in this conversation): " + strings.Join(names, ", ")
+	var sb strings.Builder
+	sb.WriteString("=== STANDING ORDERS (every turn) ===\n")
+	sb.WriteString("You are an autonomous coding agent in the developer's terminal. No sandbox, no /mnt/data, no Teams/mail/SharePoint/\"records\" — the repo on the developer's machine is the only source of truth, reachable ONLY via tools.\n")
+	if root != "" {
+		sb.WriteString("Working directory (the repo): " + root + " — never ask for a path or branch; look with git status / ls / read.\n")
+	}
+	sb.WriteString("To act, emit ```tool_call fenced JSON: {\"name\": \"<tool>\", \"arguments\": {...}} — one object per block, several blocks for several calls, then STOP and wait for results. Never narrate what you would do; do it. Never ask the developer for files, paths or output you can fetch. Plain prose (no tool_call) only when the task is DONE. Begin with a brief <thinking>…</thinking>.\n")
+	sb.WriteString("Tools (definitions were given at the start of this conversation): " + strings.Join(names, ", ") + "\n")
+	sb.WriteString("=== END STANDING ORDERS ===")
+	return sb.String()
 }
 
 func compactJSON(raw json.RawMessage) string {
@@ -136,8 +147,13 @@ func extractToolCallsChecked(text string, known map[string]bool, schemas map[str
 				continue
 			}
 			if known != nil && !known[pc.Name] {
-				problems = append(problems, fmt.Sprintf("unknown tool %q", pc.Name))
-				continue
+				if real := resolveToolName(pc.Name, known); real != "" {
+					pc.Name = real
+					repaired++
+				} else {
+					problems = append(problems, fmt.Sprintf("unknown tool %q (valid: %s)", pc.Name, strings.Join(sortedKeys(known), ", ")))
+					continue
+				}
 			}
 			if len(pc.Args) == 0 || string(pc.Args) == "null" {
 				pc.Args = json.RawMessage("{}")
@@ -176,4 +192,94 @@ func toOpenAIToolCalls(calls []parsedCall, seed string) []oaiToolCall {
 		})
 	}
 	return out
+}
+
+// resolveToolName maps a mangled name to a real one: case/punctuation-
+// insensitive match first ("local-memory.search" → "local-memory_search"),
+// then a unique suffix match ("search" → "local-memory_search" if only one
+// tool ends that way). Returns "" if ambiguous or nothing fits.
+func resolveToolName(name string, known map[string]bool) string {
+	norm := func(s string) string {
+		var b strings.Builder
+		for _, r := range strings.ToLower(s) {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	n := norm(name)
+	if n == "" {
+		return ""
+	}
+	var hit string
+	for k := range known {
+		if norm(k) == n {
+			return k
+		}
+	}
+	for k := range known {
+		if strings.HasSuffix(norm(k), n) || strings.HasSuffix(n, norm(k)) {
+			if hit != "" {
+				return "" // ambiguous
+			}
+			hit = k
+		}
+	}
+	return hit
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mentionedTools returns known tool names (or MCP server prefixes) that the
+// user's message explicitly refers to — "use local-memory", "call todoread".
+func mentionedTools(userMsg string, known map[string]bool) []string {
+	low := strings.ToLower(userMsg)
+	var out []string
+	seen := map[string]bool{}
+	for k := range known {
+		lk := strings.ToLower(k)
+		// Full name, or the MCP server prefix before the first '_' (e.g. "local-memory").
+		prefix := lk
+		if i := strings.Index(lk, "_"); i > 2 {
+			prefix = lk[:i]
+		}
+		if wordIn(low, lk) || (len(prefix) >= 4 && wordIn(low, prefix)) {
+			if !seen[k] {
+				out = append(out, k)
+				seen[k] = true
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// wordIn: needle appears in hay bounded by non-alphanumerics (so "read"
+// doesn't match inside "todoread").
+func wordIn(hay, needle string) bool {
+	isAl := func(b byte) bool { return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' }
+	for i := strings.Index(hay, needle); i >= 0; {
+		j := i + len(needle)
+		if (i == 0 || !isAl(hay[i-1])) && (j == len(hay) || !isAl(hay[j])) {
+			return true
+		}
+		k := strings.Index(hay[i+1:], needle)
+		if k < 0 {
+			return false
+		}
+		i += 1 + k
+	}
+	return false
+}
+
+func mentionNudge(names []string) string {
+	return "The developer explicitly asked you to use: " + strings.Join(names, ", ") + ". You did not call any of them. Call the appropriate one NOW with a ```tool_call block. Do not explain, do not ask — call it."
 }

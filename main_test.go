@@ -162,7 +162,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 		t.Errorf("expected conversation reuse, created %d", g.convs)
 	}
 	// Turn 2 rides the reused conversation: names-only reminder, not the full catalog.
-	if tc2 := g.prompts[1]; strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") || strings.Contains(tc2, defaultPersona) {
+	if tc2 := g.prompts[1]; strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") || strings.Contains(tc2, defaultPersona) || !strings.Contains(tc2, "STANDING ORDERS") {
 		t.Errorf("reuse turn should carry a names-only reminder, got: %.300q", tc2)
 	}
 	if len(g.prompts) != 2 || strings.Contains(g.prompts[1], "what does main.go say?") || !strings.Contains(g.prompts[1], "Tool result [read]:\npackage main // hello") {
@@ -342,5 +342,20 @@ func TestFirstTurnTaskNudge(t *testing.T) {
 	_, out = post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"hey"}]}`)
 	if n != 1 || *out.Choices[0].FinishReason != "stop" {
 		t.Fatalf("greeting nudged: sends=%d", n)
+	}
+}
+
+func TestResumeRefusalTells(t *testing.T) {
+	for _, txt := range []string{
+		"I can't determine where we left off from chat history alone. Give me the repo path or exact repo name and branch and I'll inspect the current state.",
+		"Which repository are you working in? Once you tell me the path I can run git status.",
+		"Unable to reconstruct the migration state without the conversation context.",
+	} {
+		if !needsNudge(txt, true, 0) {
+			t.Errorf("should nudge: %q", txt)
+		}
+	}
+	if !strings.Contains(enforceNudgeFor("/w/repo"), "/w/repo") || enforceNudgeFor("") != enforceNudge {
+		t.Error("nudge root wiring")
 	}
 }

@@ -3,9 +3,9 @@
 // OpenAI-compatible local front door for Microsoft 365 Copilot, with a
 // tool-calling shim so OpenCode runs as a full coding agent on top of it.
 //
-//   OpenCode --OpenAI JSON (+tools)--> :8080/v1/chat/completions --Graph--> Copilot
-//   Copilot  --text with ```tool_call blocks--> proxy --OpenAI tool_calls--> OpenCode
-//   OpenCode executes read/grep/edit/bash LOCALLY, sends role:"tool" results, loop.
+//	OpenCode --OpenAI JSON (+tools)--> :8080/v1/chat/completions --Graph--> Copilot
+//	Copilot  --text with ```tool_call blocks--> proxy --OpenAI tool_calls--> OpenCode
+//	OpenCode executes read/grep/edit/bash LOCALLY, sends role:"tool" results, loop.
 //
 // Files: config.go (env), auth.go (Entra OAuth2), openai.go (wire types),
 // tools.go (tool-call protocol + parser), convo.go (conversation reuse and
@@ -20,6 +20,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -28,6 +30,7 @@ type Server struct {
 	cfg   Config
 	graph *GraphClient
 	convs *ConvCache
+	repo  *RepoMapper
 }
 
 func (s *Server) routes() http.Handler {
@@ -84,6 +87,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			Text:        system,
 		})
 	}
+	if s.cfg.RepoMap {
+		if rc := s.repo.Context(detectRoot(s.cfg, system)); rc != nil {
+			contexts = append(contexts, *rc)
+		}
+	}
 	known := map[string]bool{}
 	if len(req.Tools) > 0 {
 		for _, t := range req.Tools {
@@ -124,6 +132,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// --- Translate reply: prose and/or tool calls. ---
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	prose, calls := extractToolCalls(text, known)
+	nudged := false
+	if s.cfg.Enforce && needsNudge(text, len(req.Tools) > 0, len(calls)) {
+		log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
+		if t2, s2, err2 := s.graph.Send(ctx, convID, enforceNudge, contexts); err2 == nil {
+			if p2, c2 := extractToolCalls(t2, known); len(c2) > 0 {
+				text, sources, prose, calls, nudged = t2, s2, p2, c2, true
+			}
+		} else {
+			log.Printf("chat: nudge failed: %v", err2)
+		}
+	}
+	s.debugDump(id, convID, prompt, contexts, text, len(calls), nudged)
 	reply := oaiMessage{Role: "assistant"}
 	finish := "stop"
 	if len(calls) > 0 {
@@ -196,6 +216,21 @@ func (s *Server) writeStream(w http.ResponseWriter, id, model string, reply oaiM
 	}
 }
 
+// debugDump writes one JSON file per turn to DEBUG_DIR — the exact prompt
+// and contexts Copilot saw and the raw text it returned. Use it to tune the
+// protocol against the real model.
+func (s *Server) debugDump(id, convID, prompt string, contexts []graphContext, reply string, calls int, nudged bool) {
+	if s.cfg.DebugDir == "" {
+		return
+	}
+	_ = os.MkdirAll(s.cfg.DebugDir, 0o700)
+	b, _ := json.MarshalIndent(map[string]any{
+		"id": id, "conversation": convID, "time": time.Now().Format(time.RFC3339),
+		"contexts": contexts, "prompt": prompt, "reply": reply, "tool_calls": calls, "nudged": nudged,
+	}, "", "  ")
+	_ = os.WriteFile(filepath.Join(s.cfg.DebugDir, id+".json"), b, 0o600)
+}
+
 func splitChunks(s string, n int) []string {
 	var out []string
 	var cur strings.Builder
@@ -246,7 +281,7 @@ func main() {
 	}
 	auth := NewAuthenticator(cfg)
 	graph := &GraphClient{cfg: cfg, auth: auth, http: &http.Client{Timeout: cfg.RequestTimeout}}
-	srv := &Server{cfg: cfg, graph: graph, convs: NewConvCache(cfg.ConvTTL)}
+	srv := &Server{cfg: cfg, graph: graph, convs: NewConvCache(cfg.ConvTTL), repo: NewRepoMapper()}
 
 	// Warm the token now so the device-code prompt appears at startup, not
 	// mid-request; then probe Graph for anything model-selector-shaped.
@@ -255,6 +290,6 @@ func main() {
 	}
 	go graph.Probe(context.Background())
 
-	log.Printf("m365-copilot-proxy on http://%s  model=%s auth=%s tools=shim conv-reuse=on", cfg.Listen, cfg.ModelName, cfg.AuthMode)
+	log.Printf("m365-copilot-proxy on http://%s  model=%s auth=%s tools=shim conv-reuse=on repomap=%v enforce=%v", cfg.Listen, cfg.ModelName, cfg.AuthMode, cfg.RepoMap, cfg.Enforce)
 	log.Fatal(http.ListenAndServe(cfg.Listen, srv.routes()))
 }

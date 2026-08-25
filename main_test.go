@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -62,7 +64,7 @@ func newProxy(t *testing.T, graphURL string) *httptest.Server {
 	cfg.MaxRetries = 0
 	auth := &Authenticator{cfg: cfg, http: http.DefaultClient,
 		tok: &tokenSet{AccessToken: "TESTTOKEN", ExpiresAt: time.Now().Add(time.Hour)}}
-	s := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour)}
+	s := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour), repo: NewRepoMapper()}
 	return httptest.NewServer(s.routes())
 }
 
@@ -215,5 +217,77 @@ func TestExtractLenientForms(t *testing.T) {
 	prose, calls := extractToolCalls("just prose with ```go\nfmt.Println()\n``` code", known)
 	if len(calls) != 0 || !strings.Contains(prose, "fmt.Println()") {
 		t.Fatalf("ordinary code fences must survive: %q %+v", prose, calls)
+	}
+}
+
+// Copilot refuses ("I can't access your files") → proxy nudges once on the
+// same conversation → Copilot complies → client sees tool_calls.
+func TestEnforceNudge(t *testing.T) {
+	n := 0
+	g := newFakeGraph(t, func(p string) string {
+		n++
+		if strings.Contains(p, "STOP. You DO have tools") {
+			return "```tool_call\n{\"name\":\"read\",\"arguments\":{\"path\":\"x\"}}\n```"
+		}
+		return "I'm sorry, but I don't have access to your files. Could you paste the contents?"
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"read x"}]}`)
+	if *out.Choices[0].FinishReason != "tool_calls" || n != 2 || g.convs != 1 {
+		t.Fatalf("nudge failed: finish=%s sends=%d convs=%d", *out.Choices[0].FinishReason, n, g.convs)
+	}
+	// Without tools offered, the same refusal text must pass through untouched.
+	n = 0
+	_, out = post(t, p.URL, `{"model":"m365-copilot","messages":[{"role":"user","content":"read x"}]}`)
+	if n != 1 || *out.Choices[0].FinishReason != "stop" {
+		t.Fatalf("nudged without tools: sends=%d", n)
+	}
+}
+
+func TestRepoMap(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "pkg", "deep", "deeper", "deepest"), 0o755)
+	os.MkdirAll(filepath.Join(root, "node_modules", "x"), 0o755)
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/feat\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	os.WriteFile(filepath.Join(root, "pkg", "a.go"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(root, "README.md"), []byte("# Proj\nhello"), 0o644)
+	os.WriteFile(filepath.Join(root, "node_modules", "x", "i.js"), []byte(""), 0o644)
+	m := buildRepoMap(root)
+	for _, want := range []string{"Git branch: feat", ".go=2", "pkg/a.go", "# Proj", "pkg/deep/deeper/"} {
+		if !strings.Contains(m, want) {
+			t.Errorf("missing %q in:\n%s", want, m)
+		}
+	}
+	for _, bad := range []string{"node_modules", ".js=", "deepest"} {
+		if strings.Contains(m, bad) {
+			t.Errorf("should not contain %q:\n%s", bad, m)
+		}
+	}
+	// Root detection from an OpenCode/Claude-Code-style system prompt.
+	cfg := Config{}
+	if got := detectRoot(cfg, "blah\nPrimary working directory: "+root+"\nmore"); got != root {
+		t.Errorf("detectRoot = %q", got)
+	}
+	if got := detectRoot(cfg, "no path here"); got != "" {
+		t.Errorf("detectRoot false positive %q", got)
+	}
+	// Injected into the request contexts.
+	g := newFakeGraph(t, func(string) string { return "ok" })
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	post(t, p.URL, `{"model":"m365-copilot","messages":[{"role":"system","content":"Working directory: `+root+`"},{"role":"user","content":"hi"}]}`)
+	found := false
+	for _, c := range g.ctxs[0] {
+		if strings.HasPrefix(c.Description, "Repository map") && strings.Contains(c.Text, "main.go") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("repo map context not injected: %+v", g.ctxs[0])
 	}
 }

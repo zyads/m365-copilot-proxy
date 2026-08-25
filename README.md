@@ -26,6 +26,15 @@ agent does: by reading it.
 - **429/5xx backoff** with `Retry-After`.
 - **Capability probe** — on startup, scans Graph `$metadata` for anything
   model/reasoning-shaped and logs it (see "Model selection").
+- **Repo map** — branch, language mix, tree (depth 3), README head, injected
+  as context so Copilot is oriented before its first tool call. Root from
+  `REPO_ROOT` or parsed from the client's system prompt. `REPO_MAP=off` to disable.
+- **Protocol enforcement** — if tools were offered and Copilot answers "I
+  can't access your files…" or narrates instead of acting, the proxy re-prompts
+  once on the same conversation. `ENFORCE_TOOLS=off` to disable.
+- **Debug dump** — `DEBUG_DIR=/tmp/copilot-dbg` writes one JSON per turn:
+  exact contexts + prompt Copilot saw, raw reply, whether a nudge fired. Use
+  it to tune the protocol against the real model.
 - **Always-on coding-agent persona** — Copilot shows up as a terse senior
   engineer that ignores your mailbox, not an Office add-in. Override with
   `AGENT_PERSONA="..."`, disable with `AGENT_PERSONA=off`.

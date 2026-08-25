@@ -53,10 +53,39 @@ for _ in $(seq 1 900); do
   sleep 1
 done
 
-# Generate the OpenCode provider config for THIS port from the repo template.
-if [ -z "${OPENCODE_CONFIG:-}" ]; then
-  mkdir -p "$CONF_DIR"
-  sed "s#http://localhost:8080/v1#http://127.0.0.1:$PROXY_PORT/v1#" "$INSTALL_DIR/opencode.json" > "$CONF_DIR/opencode.json"
-  export OPENCODE_CONFIG="$CONF_DIR/opencode.json"
+# Merge the m365 provider into the user's GLOBAL OpenCode config instead of
+# replacing it via OPENCODE_CONFIG — replacing it silently dropped every MCP
+# server / skill defined there ("not exposed in this session's toolset").
+# Idempotent; keeps everything else; backs the file up once.
+OC_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
+mkdir -p "$(dirname "$OC_CFG")"
+[ -f "$OC_CFG" ] || echo '{}' > "$OC_CFG"
+[ -f "$OC_CFG.pre-m365.bak" ] || cp "$OC_CFG" "$OC_CFG.pre-m365.bak"
+if command -v python3 >/dev/null; then
+  python3 - "$OC_CFG" "$INSTALL_DIR/opencode.json" "$PROXY_PORT" <<'PY'
+import json, sys, re
+dst, tpl, port = sys.argv[1], sys.argv[2], sys.argv[3]
+def load(p):
+    txt = open(p).read()
+    txt = re.sub(r'^\s*//.*$', '', txt, flags=re.M)  # tolerate // comments (jsonc)
+    return json.loads(txt or '{}')
+cfg, t = load(dst), load(tpl)
+prov = t["provider"]["m365"]
+prov["options"]["baseURL"] = f"http://127.0.0.1:{port}/v1"
+cfg.setdefault("$schema", t.get("$schema", "https://opencode.ai/config.json"))
+cfg.setdefault("provider", {})["m365"] = prov
+cfg.setdefault("model", t.get("model", "m365/m365-copilot"))   # only if the user has no default
+json.dump(cfg, open(dst, "w"), indent=2); open(dst, "a").write("\n")
+PY
+elif command -v node >/dev/null; then
+  node -e '
+const fs=require("fs");const [dst,tpl,port]=process.argv.slice(1);
+const load=p=>JSON.parse(fs.readFileSync(p,"utf8").replace(/^\s*\/\/.*$/mg,"")||"{}");
+const cfg=load(dst),t=load(tpl);const prov=t.provider.m365;prov.options.baseURL=`http://127.0.0.1:${port}/v1`;
+cfg["$schema"]??=t["$schema"];(cfg.provider??={}).m365=prov;cfg.model??=t.model;
+fs.writeFileSync(dst,JSON.stringify(cfg,null,2)+"\n");' "$OC_CFG" "$INSTALL_DIR/opencode.json" "$PROXY_PORT"
+else
+  echo "!! need python3 or node to merge $OC_CFG — add the provider from $INSTALL_DIR/opencode.json by hand (baseURL port $PROXY_PORT)" >&2
 fi
+unset OPENCODE_CONFIG   # never shadow the user's real config
 exec opencode "$@"

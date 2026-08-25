@@ -100,10 +100,11 @@ with linger on Linux, launchd on macOS — survives logout, starts at boot;
 nohup/setsid fallback elsewhere) and two commands:
 - `opencode-copilot [args]` — start-if-down → `POST /update` (pull, rebuild,
   re-exec when idle if main moved) → show device code if not signed in →
-  generate `~/.config/m365-copilot-proxy/opencode.json` for the configured
-  port (`LISTEN` in the env file, or `PROXY_PORT`) → `exec opencode`.
-  The repo's `opencode.json` is the template; copy it by hand only if you
-  aren't using the launcher.
+  merge the `m365` provider (with the configured port — `LISTEN` in the env
+  file, or `PROXY_PORT`) into your **global** `~/.config/opencode/opencode.json`
+  → `exec opencode`. Merging, not replacing: your MCP servers, skills and
+  project configs stay untouched (a one-time `.pre-m365.bak` is kept). The
+  repo's `opencode.json` is just the template.
 - `copilot-proxy status|start|restart|stop|logs|update|auth`.
 
 The proxy also checks origin/main itself on startup and every 6h

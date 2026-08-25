@@ -16,6 +16,16 @@ Copilot never touches your files; OpenCode's own local tools do. Copilot is
 just the brain. That's how it "understands the repo" — the same way every
 agent does: by reading it.
 
+## mcp-autopilot — relevant MCP tools only, for every model
+258 MCP tools offered per turn drowns *any* model. `opencode-plugin/mcp-autopilot.ts`
+is an OpenCode plugin (installed to `~/.config/opencode/plugins/` by the
+installer/launcher) that, before each of your messages, connects the MCP
+servers your text calls for — server-name tokens, your regex rules, an
+`always` list — and disconnects servers idle for N turns. The model also
+gets `mcp_list` / `mcp_enable` / `mcp_disable` to pull a server in itself
+mid-task. Works with Opus or anything else; nothing to do with the proxy.
+Config: `~/.config/opencode/mcp-autopilot.json` (see the example file).
+
 ## No "Microslop" (field-tested)
 Copilot grounds on Teams/mail/SharePoint whenever a prompt sounds like
 history ("continue where we left off") and decorates answers with `[1]`

@@ -88,4 +88,11 @@ else
   echo "!! need python3 or node to merge $OC_CFG — add the provider from $INSTALL_DIR/opencode.json by hand (baseURL port $PROXY_PORT)" >&2
 fi
 unset OPENCODE_CONFIG   # never shadow the user's real config
+
+# Keep the mcp-autopilot plugin current (it self-updates with the repo).
+OC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+mkdir -p "$OC_DIR/plugins"
+cp "$INSTALL_DIR/opencode-plugin/mcp-autopilot.ts" "$OC_DIR/plugins/mcp-autopilot.ts"
+[ -f "$OC_DIR/mcp-autopilot.json" ] || cp "$INSTALL_DIR/opencode-plugin/mcp-autopilot.example.json" "$OC_DIR/mcp-autopilot.json"
+
 exec opencode "$@"

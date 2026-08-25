@@ -67,6 +67,12 @@ install -m 755 "$INSTALL_DIR/bin/opencode-copilot" "$BIN_DIR/opencode-copilot"
 install -m 755 "$INSTALL_DIR/bin/copilot-proxy"    "$BIN_DIR/copilot-proxy"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "!! add $BIN_DIR to your PATH";; esac
 
+# --- mcp-autopilot plugin (works for every model, not just Copilot) --------
+OC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+mkdir -p "$OC_DIR/plugins"
+cp "$INSTALL_DIR/opencode-plugin/mcp-autopilot.ts" "$OC_DIR/plugins/mcp-autopilot.ts"
+[ -f "$OC_DIR/mcp-autopilot.json" ] || cp "$INSTALL_DIR/opencode-plugin/mcp-autopilot.example.json" "$OC_DIR/mcp-autopilot.json"
+
 # --- persistent service -----------------------------------------------------
 OS="$(uname -s)"
 if [ "$OS" = Linux ] && command -v systemctl >/dev/null; then

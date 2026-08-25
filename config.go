@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type Config struct {
 	RepoMap        bool   // inject the repo map context (default on)
 	Enforce        bool   // re-prompt once when Copilot refuses to use tools (default on)
 	DebugDir       string // if set, dump every prompt/reply pair here as JSON
+	ToolResultMax  int    // bytes of one tool result kept verbatim (head+tail beyond)
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -35,6 +37,15 @@ type Config struct {
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
 	}
 	return def
 }
@@ -61,6 +72,7 @@ func loadConfig() Config {
 		RepoMap:        env("REPO_MAP", "on") != "off",
 		Enforce:        env("ENFORCE_TOOLS", "on") != "off",
 		DebugDir:       os.Getenv("DEBUG_DIR"),
+		ToolResultMax:  envInt("MAX_TOOL_RESULT", defaultToolResultBudget),
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

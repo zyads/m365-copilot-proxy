@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -153,6 +154,9 @@ func (g *GraphClient) Send(ctx context.Context, convID, prompt string, contexts 
 		return "", "", err
 	}
 	if status/100 != 2 {
+		if isTooLarge(status, b) {
+			return "", "", errTooLarge
+		}
 		return "", "", fmt.Errorf("graph chat: HTTP %d: %s", status, truncate(b, 600))
 	}
 	var out graphChatResponse
@@ -214,6 +218,15 @@ func (g *GraphClient) Probe(ctx context.Context) {
 		return
 	}
 	log.Printf("probe: POSSIBLE MODEL KNOBS in Graph schema: %s  → try GRAPH_EXTRA_BODY", strings.Join(hits, ", "))
+}
+
+// errTooLarge tells the server to shrink the prompt and try again.
+var errTooLarge = errors.New("graph chat: message too large")
+
+var tooLargeRe = regexp.MustCompile(`(?i)too (?:long|large)|exceed|length|payload|limit|maximum`)
+
+func isTooLarge(status int, body []byte) bool {
+	return status == 413 || (status == 400 && tooLargeRe.Match(body))
 }
 
 func truncate(b []byte, n int) string {

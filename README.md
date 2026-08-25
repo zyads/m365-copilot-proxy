@@ -32,6 +32,17 @@ agent does: by reading it.
 - **Protocol enforcement** — if tools were offered and Copilot answers "I
   can't access your files…" or narrates instead of acting, the proxy re-prompts
   once on the same conversation. `ENFORCE_TOOLS=off` to disable.
+- **Argument repair + validation** — trailing commas, single quotes, raw
+  newlines, prose-wrapped JSON all get fixed; missing/unknown arguments (per
+  the tool's schema) trigger one precise re-prompt ("missing required
+  argument \"path\"") instead of a broken call reaching OpenCode.
+- **Size control** — tool results are head+tail compacted (`MAX_TOOL_RESULT`,
+  default 24k); replayed histories fold old tool results to one-liners; if
+  Graph still says "too large" the proxy halves the budget and retries.
+- **Per-conversation lock** — OpenCode's parallel requests (title gen + main
+  turn) can't interleave writes to one Graph conversation.
+- **`/stats`** — turns, tool calls, nudges, repairs, conv reuse, shrinks,
+  latency p50/p95. Curl it while tuning against the real model.
 - **Debug dump** — `DEBUG_DIR=/tmp/copilot-dbg` writes one JSON per turn:
   exact contexts + prompt Copilot saw, raw reply, whether a nudge fired. Use
   it to tune the protocol against the real model.

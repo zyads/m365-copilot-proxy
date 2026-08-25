@@ -77,8 +77,15 @@ type parsedCall struct {
 }
 
 // extractToolCalls pulls every protocol block out of Copilot's reply. It
-// returns the surviving prose (blocks removed) and the calls, in order.
+// returns the surviving prose (blocks removed), the calls in order, and any
+// problems (unparseable blocks, unknown tools, invalid arguments) worth
+// re-prompting about. `repaired` counts blocks that only parsed after repair.
 func extractToolCalls(text string, known map[string]bool) (prose string, calls []parsedCall) {
+	prose, calls, _, _ = extractToolCallsChecked(text, known, nil)
+	return
+}
+
+func extractToolCallsChecked(text string, known map[string]bool, schemas map[string]toolSchema) (prose string, calls []parsedCall, problems []string, repaired int) {
 	prose = text
 	for _, re := range []*regexp.Regexp{fencedCall, xmlCall} {
 		for _, m := range re.FindAllStringSubmatch(prose, -1) {
@@ -89,22 +96,43 @@ func extractToolCalls(text string, known map[string]bool) (prose string, calls [
 				var wrap struct {
 					ToolCall *parsedCall `json:"tool_call"`
 				}
-				if json.Unmarshal([]byte(raw), &wrap) != nil || wrap.ToolCall == nil {
-					continue
+				if json.Unmarshal([]byte(raw), &wrap) == nil && wrap.ToolCall != nil {
+					pc = *wrap.ToolCall
+				} else if fixed, ok := repairJSON(raw); ok {
+					_ = json.Unmarshal(fixed, &pc)
+					if pc.Name != "" {
+						repaired++
+					}
 				}
-				pc = *wrap.ToolCall
 			}
-			if pc.Name == "" || (known != nil && !known[pc.Name]) {
+			if pc.Name == "" {
+				problems = append(problems, "a tool_call block was not valid JSON: "+truncate([]byte(raw), 160))
 				continue
 			}
-			if len(pc.Args) == 0 {
+			if known != nil && !known[pc.Name] {
+				problems = append(problems, fmt.Sprintf("unknown tool %q", pc.Name))
+				continue
+			}
+			if len(pc.Args) == 0 || string(pc.Args) == "null" {
 				pc.Args = json.RawMessage("{}")
+			} else if !json.Valid(pc.Args) {
+				if fixed, ok := repairJSON(string(pc.Args)); ok {
+					pc.Args = fixed
+					repaired++
+				} else {
+					problems = append(problems, fmt.Sprintf("%s: arguments are not valid JSON", pc.Name))
+					continue
+				}
+			}
+			if ps := validateArgs(pc.Name, pc.Args, schemas); len(ps) > 0 {
+				problems = append(problems, ps...)
+				continue
 			}
 			calls = append(calls, pc)
 		}
 		prose = re.ReplaceAllString(prose, "")
 	}
-	return strings.TrimSpace(prose), calls
+	return strings.TrimSpace(prose), calls, problems, repaired
 }
 
 // toOpenAIToolCalls converts parsed calls into the wire shape, minting ids.

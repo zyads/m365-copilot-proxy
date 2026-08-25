@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,6 +33,15 @@ type Server struct {
 	graph *GraphClient
 	convs *ConvCache
 	repo  *RepoMapper
+	stats Stats
+	locks sync.Map // convID -> *sync.Mutex; serialises writes to one Graph conversation
+}
+
+func (s *Server) lockConv(id string) func() {
+	m, _ := s.locks.LoadOrStore(id, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func (s *Server) routes() http.Handler {
@@ -38,6 +49,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/stats", s.stats.handler)
 	return logMiddleware(mux)
 }
 
@@ -104,46 +116,87 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Conversation reuse: send only what this Graph conversation hasn't seen. ---
+	schemas := parseSchemas(req.Tools)
 	convID, consumed := s.convs.Lookup(req.Messages)
-	var prompt string
-	if convID != "" && consumed <= len(req.Messages) {
-		_, deltaTurns := splitSystem(req.Messages[consumed:])
-		prompt = renderTurns(turns, deltaTurns, true)
-		log.Printf("chat: reusing conversation %s (+%d msgs)", shortID(convID), len(req.Messages)-consumed)
-	} else {
+	reuse := convID != "" && consumed <= len(req.Messages)
+	if !reuse {
 		id, err := s.graph.NewConversation(ctx)
 		if err != nil {
-			log.Printf("chat: %v", err)
-			writeOpenAIError(w, http.StatusBadGateway, err.Error())
+			s.fail(w, err)
 			return
 		}
 		convID = id
-		prompt = renderTurns(turns, turns, false)
+		s.stats.NewConvs.Add(1)
 		log.Printf("chat: new conversation %s (%d msgs, %d tools)", shortID(convID), len(req.Messages), len(req.Tools))
+	} else {
+		s.stats.ReusedConvs.Add(1)
+		log.Printf("chat: reusing conversation %s (+%d msgs)", shortID(convID), len(req.Messages)-consumed)
+	}
+	unlock := s.lockConv(convID)
+	defer unlock()
+
+	render := func(budget int) string {
+		if reuse {
+			_, delta := splitSystem(req.Messages[consumed:])
+			return renderTurns(turns, delta, true, budget)
+		}
+		return renderTurns(turns, turns, false, budget)
 	}
 
-	text, sources, err := s.graph.Send(ctx, convID, prompt, contexts)
+	// --- Send, shrinking the tool-result budget if Graph says "too large". ---
+	started := time.Now()
+	budget := s.cfg.ToolResultMax
+	var prompt, text, sources string
+	var err error
+	for attempt := 0; ; attempt++ {
+		prompt = render(budget)
+		text, sources, err = s.graph.Send(ctx, convID, prompt, contexts)
+		if err == nil || !errors.Is(err, errTooLarge) || attempt >= 3 {
+			break
+		}
+		budget /= 2
+		s.stats.Shrinks.Add(1)
+		log.Printf("chat: message too large — retrying with tool-result budget %d", budget)
+	}
 	if err != nil {
-		log.Printf("chat: %v", err)
-		writeOpenAIError(w, http.StatusBadGateway, err.Error())
+		s.fail(w, err)
 		return
 	}
 
-	// --- Translate reply: prose and/or tool calls. ---
+	// --- Translate reply: prose and/or tool calls; repair, enforce, re-prompt. ---
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
-	prose, calls := extractToolCalls(text, known)
+	toolsOffered := len(req.Tools) > 0
+	prose, calls, problems, repaired := extractToolCallsChecked(text, known, schemas)
+	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
-	if s.cfg.Enforce && needsNudge(text, len(req.Tools) > 0, len(calls)) {
-		log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
-		if t2, s2, err2 := s.graph.Send(ctx, convID, enforceNudge, contexts); err2 == nil {
-			if p2, c2 := extractToolCalls(t2, known); len(c2) > 0 {
-				text, sources, prose, calls, nudged = t2, s2, p2, c2, true
+	if s.cfg.Enforce && toolsOffered {
+		var nudge string
+		switch {
+		case len(calls) == 0 && len(problems) > 0:
+			nudge = repairNudge(problems)
+			s.stats.RepairFailures.Add(1)
+			log.Printf("chat: invalid tool args (%s) — re-prompting", strings.Join(problems, "; "))
+		case needsNudge(text, true, len(calls)):
+			nudge = enforceNudge
+			log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
+		}
+		if nudge != "" {
+			s.stats.Nudges.Add(1)
+			if t2, s2, err2 := s.graph.Send(ctx, convID, nudge, contexts); err2 == nil {
+				if p2, c2, _, r2 := extractToolCallsChecked(t2, known, schemas); len(c2) > 0 {
+					text, sources, prose, calls, nudged = t2, s2, p2, c2, true
+					s.stats.Repairs.Add(int64(r2))
+				}
+			} else {
+				log.Printf("chat: nudge failed: %v", err2)
 			}
-		} else {
-			log.Printf("chat: nudge failed: %v", err2)
 		}
 	}
 	s.debugDump(id, convID, prompt, contexts, text, len(calls), nudged)
+	s.stats.Turns.Add(1)
+	s.stats.ToolCalls.Add(int64(len(calls)))
+	s.stats.observe(time.Since(started))
+
 	reply := oaiMessage{Role: "assistant"}
 	finish := "stop"
 	if len(calls) > 0 {
@@ -214,6 +267,12 @@ func (s *Server) writeStream(w http.ResponseWriter, id, model string, reply oaiM
 	if flusher != nil {
 		flusher.Flush()
 	}
+}
+
+func (s *Server) fail(w http.ResponseWriter, err error) {
+	s.stats.Errors.Add(1)
+	log.Printf("chat: %v", err)
+	writeOpenAIError(w, http.StatusBadGateway, err.Error())
 }
 
 // debugDump writes one JSON file per turn to DEBUG_DIR — the exact prompt

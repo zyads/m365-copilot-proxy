@@ -9,6 +9,7 @@ export M365_CLIENT_ID="${M365_CLIENT_ID:?set M365_CLIENT_ID (app registration cl
 #   AUTH_MODE=device_code|client_credentials   (default device_code — the one that works)
 #   M365_SCOPES="https://graph.microsoft.com/.default offline_access"
 #   AGENT_PERSONA="custom text" | off      (default: built-in coding-agent persona)
+#   MAX_TOOL_RESULT=24000
 #   REPO_ROOT=/path/to/repo  REPO_MAP=off  ENFORCE_TOOLS=off  DEBUG_DIR=/tmp/copilot-dbg
 #   LISTEN=127.0.0.1:8080  MODEL_NAME=m365-copilot  M365_TIMEZONE=America/New_York
 #   GRAPH_BASE=https://graph.microsoft.com/beta

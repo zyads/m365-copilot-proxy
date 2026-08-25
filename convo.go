@@ -104,7 +104,10 @@ func splitSystem(msgs []oaiMessage) (system string, rest []oaiMessage) {
 //
 // `all` is the full (non-system) history — used only to label tool results by
 // name; `msgs` is the slice actually rendered (the whole history, or the delta).
-func renderTurns(all, msgs []oaiMessage, isDelta bool) string {
+func renderTurns(all, msgs []oaiMessage, isDelta bool, budget int) string {
+	if !isDelta {
+		msgs = foldHistory(msgs, keepVerbatimResults)
+	}
 	names := map[string]string{}
 	for _, m := range all {
 		for _, tc := range m.ToolCalls {
@@ -143,7 +146,7 @@ func renderTurns(all, msgs []oaiMessage, isDelta bool) string {
 				name = m.Name
 			}
 			sb.WriteString("Tool result [" + name + "]:\n")
-			sb.WriteString(truncateStr(text, 60_000))
+			sb.WriteString(compactResult(text, budget))
 			sb.WriteString("\n\n")
 		}
 	}
@@ -151,13 +154,6 @@ func renderTurns(all, msgs []oaiMessage, isDelta bool) string {
 		sb.WriteString("Continue. Call more tools if needed, otherwise give the final answer in prose.")
 	}
 	return strings.TrimSpace(sb.String())
-}
-
-func truncateStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "\n…[truncated " + itoa(len(s)-n) + " bytes]"
 }
 
 func itoa(i int) string {

@@ -75,6 +75,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// --- Build contexts: caller's system prompt + tool protocol (if tools). ---
 	system, turns := splitSystem(req.Messages)
 	var contexts []graphContext
+	if pc := personaContext(s.cfg); pc != nil {
+		contexts = append(contexts, *pc) // first, so it frames everything after
+	}
 	if system != "" {
 		contexts = append(contexts, graphContext{
 			Description: "System instructions from the calling application. Follow them.",

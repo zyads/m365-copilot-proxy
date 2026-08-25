@@ -101,8 +101,8 @@ func TestPlainChat(t *testing.T) {
 			t.Errorf("missing %q in %q", want, got)
 		}
 	}
-	if g.ctxs[0][0].Text != "You are terse." || len(g.ctxs[0]) != 1 {
-		t.Errorf("system context wrong: %+v", g.ctxs[0])
+	if len(g.ctxs[0]) != 2 || g.ctxs[0][0].Text != defaultPersona || g.ctxs[0][1].Text != "You are terse." {
+		t.Errorf("contexts should be [persona, system]: %+v", g.ctxs[0])
 	}
 	if *out.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish %v", *out.Choices[0].FinishReason)
@@ -136,7 +136,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if string(m.Content) != "Let me look." {
 		t.Errorf("prose should be stripped of blocks: %q", m.Content)
 	}
-	if len(g.ctxs[0]) != 2 || !strings.Contains(g.ctxs[0][1].Text, "### read") || !strings.Contains(g.ctxs[0][1].Text, "### bash") {
+	if len(g.ctxs[0]) != 3 || !strings.Contains(g.ctxs[0][2].Text, "### read") || !strings.Contains(g.ctxs[0][2].Text, "### bash") {
 		t.Errorf("tool protocol context missing: %+v", g.ctxs[0])
 	}
 

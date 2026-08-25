@@ -21,6 +21,7 @@ type Config struct {
 	ChatPathFmt    string // /copilot/conversations/%s/chat
 	ExtraBody      string // JSON merged into every chat body (future "model" knob etc.)
 	ModelName      string // what we advertise on /v1/models and echo back
+	Persona        string // "" = built-in coding-agent persona, "off" = none, else custom text
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -51,6 +52,7 @@ func loadConfig() Config {
 		ChatPathFmt:    env("GRAPH_CHAT_PATH_FMT", "/copilot/conversations/%s/chat"),
 		ExtraBody:      env("GRAPH_EXTRA_BODY", ""),
 		ModelName:      env("MODEL_NAME", "m365-copilot"),
+		Persona:        os.Getenv("AGENT_PERSONA"),
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

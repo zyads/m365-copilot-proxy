@@ -26,6 +26,9 @@ agent does: by reading it.
 - **429/5xx backoff** with `Retry-After`.
 - **Capability probe** — on startup, scans Graph `$metadata` for anything
   model/reasoning-shaped and logs it (see "Model selection").
+- **Always-on coding-agent persona** — Copilot shows up as a terse senior
+  engineer that ignores your mailbox, not an Office add-in. Override with
+  `AGENT_PERSONA="..."`, disable with `AGENT_PERSONA=off`.
 - Confidential-client support (secret on refresh) and public-client device code.
 
 ## Model selection — read this

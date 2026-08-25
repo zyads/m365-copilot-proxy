@@ -1,9 +1,40 @@
 # m365-copilot-proxy
 
-Local OpenAI-compatible front door for Microsoft 365 Copilot. OpenCode (or curl)
-talks to `http://localhost:8080/v1`; the proxy signs you in with device code,
-opens a Graph Copilot conversation, sends your flattened chat, and hands the
-answer back as OpenAI JSON (streaming or not).
+Turn Microsoft 365 Copilot into a full **agentic coding model** for OpenCode.
+
+OpenCode talks OpenAI to `http://localhost:8080/v1`. The proxy signs you in
+with device code, drives the Graph Copilot Chat API, and — the important part —
+gives Copilot **tool calling** it doesn't natively have:
+
+```
+OpenCode ──OpenAI JSON + tools[]──▶ proxy ──prompt + protocol──▶ M365 Copilot
+OpenCode ◀─── OpenAI tool_calls ─── proxy ◀── ```tool_call blocks ── Copilot
+OpenCode runs read/grep/glob/edit/bash ON YOUR REPO, sends results, loop…
+```
+
+Copilot never touches your files; OpenCode's own local tools do. Copilot is
+just the brain. That's how it "understands the repo" — the same way every
+agent does: by reading it.
+
+## What's in the box
+- **Tool-calling shim** — strict fenced-JSON protocol injected as a Copilot
+  context; parsed back into real OpenAI `tool_calls` (parallel calls, lenient
+  XML/wrapped forms, unknown tool names dropped, ordinary code fences untouched).
+- **Conversation reuse** — the Graph conversation is kept per message-prefix;
+  each agent step sends only the new tool results, not the whole transcript.
+- **Streaming** — proper SSE incl. `tool_calls` deltas and `finish_reason`.
+- **429/5xx backoff** with `Retry-After`.
+- **Capability probe** — on startup, scans Graph `$metadata` for anything
+  model/reasoning-shaped and logs it (see "Model selection").
+- Confidential-client support (secret on refresh) and public-client device code.
+
+## Model selection — read this
+The Graph Copilot Chat API exposes **no model parameter and no model list**.
+Microsoft picks the model server-side ("Think Deeper"/GPT-5 are UI features,
+not API knobs). There is nothing to query, so this proxy doesn't pretend to.
+What it does: the startup probe logs `POSSIBLE MODEL KNOBS` if Microsoft ever
+adds one to the schema; then set `GRAPH_EXTRA_BODY='{"model":"..."}'` and every
+chat body carries it. No code change.
 
 ## Entra app registration — what you actually need
 - Delegated Graph permissions consented (you already have this).
@@ -32,13 +63,19 @@ Copy `opencode.json` into the project you run OpenCode in (or
 `patch_opencode.sh` rewrites hardcoded upstream URLs in a clone if you insist
 on a hard fork.
 
-## Known limits (not bugs)
-- Copilot returns no `tool_calls`; OpenCode's agentic edit/run loop won't fire.
+## Known limits (honest)
+- Tool calling is prompt-driven. A GPT-5-class Copilot follows the protocol
+  reliably; if a reply comes back with prose instead of a block, OpenCode just
+  shows the prose and you nudge it. Unknown tool names are dropped.
 - Graph reports no token usage; `usage` is estimated (len/4).
 - The Copilot Chat API is `/beta`; paths are env-overridable if Microsoft moves it.
+- Copilot may refuse or add enterprise "Sources:" — sources are only appended
+  to final prose answers, never to tool-call turns.
+- Tenant Conditional Access can block device code; use `M365_CLIENT_SECRET`
+  with a confidential app registration in that case (refresh still works).
 
 ## Dev
 ```sh
-go test ./...   # mocked Graph, covers streaming + non-streaming + content-array form
+go test ./...   # mocked Graph: plain chat, full tool loop w/ conversation reuse, SSE tool deltas, lenient parsing
 go build -o m365-copilot-proxy .
 ```

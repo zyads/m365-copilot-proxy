@@ -26,6 +26,8 @@ type graphContext struct {
 
 type graphMessage struct {
 	ID           string `json:"id"`
+	Type         string `json:"@odata.type"` // #microsoft.graph.copilotUserMessage | copilotResponseMessage …
+	Role         string `json:"role"`        // some builds: "user" | "assistant"
 	Text         string `json:"text"`
 	Attributions []struct {
 		ProviderDisplayName string `json:"providerDisplayName"`
@@ -172,8 +174,7 @@ func (g *GraphClient) Send(ctx context.Context, convID, prompt string, contexts 
 	if out.Error != nil {
 		return "", "", fmt.Errorf("graph chat: %s: %s", out.Error.Code, out.Error.Message)
 	}
-	if n := len(out.Messages); n > 0 {
-		m := out.Messages[n-1]
+	if m := pickResponse(out.Messages, prompt); m != nil {
 		text = m.Text
 		var refs []string
 		for _, a := range m.Attributions {
@@ -187,10 +188,50 @@ func (g *GraphClient) Send(ctx context.Context, convID, prompt string, contexts 
 	} else {
 		text = out.Text
 	}
+	text = stripPolicyNotice(text)
 	if strings.TrimSpace(text) == "" {
-		return "", "", fmt.Errorf("graph chat: empty reply in %s", truncate(b, 300))
+		return "", "", errNoAnswer
 	}
 	return text, sources, nil
+}
+
+// errNoAnswer: Copilot returned no assistant message (or only a policy
+// notice). The server turns this into a nudge rather than a 502.
+var errNoAnswer = errors.New("graph chat: Copilot returned no answer")
+
+// pickResponse finds the assistant's message. Field-tested: taking the LAST
+// message echoed our own prompt back when Copilot produced no answer.
+// Order: @odata.type/role says response → last message that is not the
+// prompt we sent → nil.
+func pickResponse(msgs []graphMessage, prompt string) *graphMessage {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		t := strings.ToLower(m.Type)
+		if strings.Contains(t, "response") || strings.Contains(t, "assistant") || strings.EqualFold(m.Role, "assistant") {
+			return &msgs[i]
+		}
+	}
+	// No typed messages: anything whose text isn't (a prefix of) our prompt.
+	p := strings.TrimSpace(prompt)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		t := strings.ToLower(msgs[i].Type)
+		if strings.Contains(t, "user") || strings.EqualFold(msgs[i].Role, "user") {
+			continue
+		}
+		mt := strings.TrimSpace(msgs[i].Text)
+		if mt == "" || mt == p || (len(mt) > 200 && strings.HasPrefix(p, mt[:200])) {
+			continue
+		}
+		return &msgs[i]
+	}
+	return nil
+}
+
+// Enterprise policy notices are not answers; drop them.
+var policyNotice = regexp.MustCompile(`(?im)^.*(?:wasn'?t|was not|isn'?t|could not be) (?:included|shown|returned)[^.\n]*(?:organization'?s?|admin|compliance|sensitivity|access) (?:polic|restriction|label)[^\n]*\n?`)
+
+func stripPolicyNotice(s string) string {
+	return strings.TrimSpace(policyNotice.ReplaceAllString(s, ""))
 }
 
 // Probe inspects Graph's OData $metadata for the Copilot entities and logs any

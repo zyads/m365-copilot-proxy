@@ -363,3 +363,62 @@ func TestBigCatalogScales(t *testing.T) {
 		t.Errorf("schema on demand missing: %v", problems)
 	}
 }
+
+func TestPickResponseNeverEchoesPrompt(t *testing.T) {
+	prompt := "=== STANDING ORDERS === lots of text " + strings.Repeat("x", 300)
+	// Typed messages: pick by type regardless of order.
+	msgs := []graphMessage{
+		{Type: "#microsoft.graph.copilotResponseMessage", Text: "real answer"},
+		{Type: "#microsoft.graph.copilotUserMessage", Text: prompt},
+	}
+	if m := pickResponse(msgs, prompt); m == nil || m.Text != "real answer" {
+		t.Errorf("typed pick failed: %+v", m)
+	}
+	// Untyped, only our prompt echoed back → nil (not the prompt).
+	if m := pickResponse([]graphMessage{{Text: prompt}}, prompt); m != nil {
+		t.Errorf("echoed prompt returned as answer: %q", m.Text[:40])
+	}
+	// Untyped user echo + answer → answer.
+	if m := pickResponse([]graphMessage{{Text: prompt}, {Text: "ok"}}, prompt); m == nil || m.Text != "ok" {
+		t.Errorf("untyped pick failed")
+	}
+	// Policy notice is not an answer.
+	if got := stripPolicyNotice("⚠ Some relevant content wasn't included due to your organization's policies. Learn about access restrictions https://learn.microsoft.com/x\n"); got != "" {
+		t.Errorf("policy notice survived: %q", got)
+	}
+	if got := stripPolicyNotice("Some content wasn't included due to your organization's policies.\nHere is the answer."); got != "Here is the answer." {
+		t.Errorf("mixed: %q", got)
+	}
+}
+
+// Graph echoes only our prompt (no answer) → proxy nudges on the same
+// conversation instead of returning the prompt as the reply.
+func TestNoAnswerNudges(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/copilot/conversations" {
+			w.Write([]byte(`{"id":"c"}`))
+			return
+		}
+		n++
+		var body struct {
+			Message struct{ Text string } `json:"message"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &body)
+		if n == 1 {
+			json.NewEncoder(w).Encode(map[string]any{"id": "c", "messages": []map[string]any{{"id": "u", "text": body.Message.Text}}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "c", "messages": []map[string]any{
+			{"id": "u", "text": body.Message.Text},
+			{"id": "a", "text": "```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"git status\"}}\n```"}}})
+	}))
+	defer srv.Close()
+	p := newProxy(t, srv.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"what happened"}]}`)
+	if n != 2 || *out.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("sends=%d finish=%s content=%.80q", n, *out.Choices[0].FinishReason, out.Choices[0].Message.Content)
+	}
+}

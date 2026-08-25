@@ -239,6 +239,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 		break
 	}
+	if errors.Is(err, errNoAnswer) && len(req.Tools) > 0 && s.cfg.Enforce {
+		// Copilot gave nothing (policy notice / grounding failure). Nudge on
+		// the same conversation instead of failing the turn.
+		log.Printf("chat: Copilot returned no answer — nudging once")
+		s.stats.Nudges.Add(1)
+		text, sources, err = s.graph.Send(ctx, convID, enforceNudgeFor(root), contexts)
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

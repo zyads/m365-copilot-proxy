@@ -62,6 +62,7 @@ func newProxy(t *testing.T, graphURL string) *httptest.Server {
 	cfg.GraphBase = graphURL
 	cfg.ClientID = "test"
 	cfg.MaxRetries = 0
+	cfg.Prime = false // exercised separately in TestPriming
 	auth := &Authenticator{cfg: cfg, http: http.DefaultClient,
 		tok: &tokenSet{AccessToken: "TESTTOKEN", ExpiresAt: time.Now().Add(time.Hour)}}
 	s := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour), repo: NewRepoMapper(), auth: auth, upd: &Updater{cfg: cfg}}

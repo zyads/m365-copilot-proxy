@@ -168,8 +168,35 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.InstrInMessage {
 		contexts = instr
 	}
+	// Priming: on a fresh conversation, send the instructions ALONE and make
+	// the model commit to the role before it sees the task. Models with a
+	// strong built-in persona follow a role far better after acknowledging
+	// it. One extra call per conversation; the task then goes as a delta.
+	primed := false
+	if !reuse && !utility && s.cfg.Prime && s.cfg.InstrInMessage && len(req.Tools) > 0 {
+		ack := renderInstructions(instr) + "\n\nThis message contains only your operating instructions. Confirm you have adopted them by replying with exactly one word: READY"
+		if _, _, perr := s.graph.Send(ctx, convID, ack, nil); perr == nil {
+			primed = true
+			s.stats.Primes.Add(1)
+			log.Printf("chat: primed conversation %s", shortID(convID))
+		} else {
+			log.Printf("chat: prime failed (%v); sending instructions with the task", perr)
+		}
+	}
+
 	render := func(budget int) string {
 		var body string
+		if primed {
+			// Instructions already delivered; send the task like a reused turn.
+			body = renderTurns(turns, turns, true, budget)
+			var rem []string
+			for _, c := range instr {
+				if strings.HasPrefix(c.Description, "Tool-calling") && len(req.Tools) > 0 {
+					rem = append(rem, renderToolReminder(req.Tools, root, recentUserText(turns, 3)))
+				}
+			}
+			return strings.Join(rem, "\n\n") + "\n\n" + body
+		}
 		if reuse {
 			_, delta := splitSystem(req.Messages[consumed:])
 			body = renderTurns(turns, delta, true, budget)
@@ -359,7 +386,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.stats.setLast(map[string]any{
 		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_names": sortedKeys(known),
 		"tool_calls": len(calls), "called": callNames(calls), "problems": problems,
-		"nudged": nudged, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "prompt_bytes": len(prompt),
+		"nudged": nudged, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "primed": primed, "prompt_bytes": len(prompt),
 		"instr_bytes":     instrBytes(instr),
 		"instructions_in": map[bool]string{true: "message", false: "contexts"}[s.cfg.InstrInMessage],
 		"reply_head":      redact(truncate([]byte(text), 240)),

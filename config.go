@@ -36,6 +36,7 @@ type Config struct {
 	Thinking       bool   // ask for <thinking> and surface it as reasoning_content (default on)
 	InstrInMessage bool   // put persona/protocol/catalog in the message text (default on); off = Graph contexts[]
 	Sources        bool   // SOURCES=on keeps Copilot attributions/citations (default off: stripped)
+	Prime          bool   // PRIME=off disables the role-commitment turn on fresh conversations
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -96,6 +97,7 @@ func loadConfig() Config {
 		Thinking:       env("THINKING", "on") != "off",
 		InstrInMessage: env("INSTRUCTIONS_IN", "message") != "contexts",
 		Sources:        env("SOURCES", "off") == "on",
+		Prime:          env("PRIME", "on") != "off",
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

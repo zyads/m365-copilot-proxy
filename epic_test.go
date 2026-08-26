@@ -593,3 +593,31 @@ func TestReuseSurvivesClientEcho(t *testing.T) {
 		t.Fatalf("reuse failed: id=%q consumed=%d", id, consumed)
 	}
 }
+
+func TestPriming(t *testing.T) {
+	var prompts []string
+	g := newFakeGraph(t, func(p string) string {
+		prompts = append(prompts, p)
+		if strings.Contains(p, "exactly one word: READY") {
+			return "READY"
+		}
+		return "```bash\ngit status\n```"
+	})
+	defer g.Close()
+	cfg := loadConfig()
+	cfg.GraphBase, cfg.ClientID, cfg.MaxRetries, cfg.Prime = g.URL, "test", 0, true
+	auth := &Authenticator{cfg: cfg, http: http.DefaultClient, tok: &tokenSet{AccessToken: "TESTTOKEN", ExpiresAt: time.Now().Add(time.Hour)}}
+	srv := &Server{cfg: cfg, graph: &GraphClient{cfg: cfg, auth: auth, http: http.DefaultClient}, convs: NewConvCache(time.Hour), repo: NewRepoMapper(), auth: auth, upd: &Updater{cfg: cfg}}
+	p := httptest.NewServer(srv.routes())
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"system","content":"sys"},{"role":"user","content":"use git status"}]}`)
+	if len(prompts) != 2 || !strings.Contains(prompts[0], defaultPersona) || !strings.Contains(prompts[0], "### bash") || strings.Contains(prompts[0], "use git status") {
+		t.Fatalf("prime message wrong (%d prompts)", len(prompts))
+	}
+	if strings.Contains(prompts[1], defaultPersona) || !strings.Contains(prompts[1], "STANDING ORDERS") || !strings.Contains(prompts[1], "use git status") {
+		t.Fatalf("task message wrong: %.300q", prompts[1])
+	}
+	if *out.Choices[0].FinishReason != "tool_calls" || g.convs != 1 {
+		t.Fatalf("priming broke the turn: %+v convs=%d", out, g.convs)
+	}
+}

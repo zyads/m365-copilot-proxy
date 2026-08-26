@@ -54,7 +54,7 @@ import json,sys
 d=json.load(sys.stdin); t=d.get("last_turn") or {}
 if not t: print("no turns yet"); sys.exit()
 print("version      :", "'"$(curl -s $URL/version | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"'")
-print("when         :", t.get("time")); print("reuse        :", t.get("reuse"), "| utility:", t.get("utility"), "| nudged:", t.get("nudged"))
+print("when         :", t.get("time")); print("reuse        :", t.get("reuse"), "| primed:", t.get("primed"), "| utility:", t.get("utility"), "| nudged:", t.get("nudged"), "| synthesized:", t.get("synthesized_call"))
 print("tools offered:", t.get("tools_offered"), "->", ", ".join(t.get("tool_names") or []) or "(none)")
 print("tool calls   :", t.get("tool_calls"), "->", t.get("called") or "(none)")
 print("problems     :", t.get("problems") or "(none)")

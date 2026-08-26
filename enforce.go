@@ -95,3 +95,5 @@ func needsNudge(reply string, toolsOffered bool, calls int) bool {
 	}
 	return refusalTells.MatchString(r) || hallucinationTells.MatchString(r)
 }
+
+const repeatNudge = `You proposed the same command again. It was already executed and its output is in the previous message — read it. Do NOT repeat it. Either give the developer the answer in plain prose (no fenced command blocks), or propose the NEXT, different command.`

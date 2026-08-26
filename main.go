@@ -273,6 +273,32 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
 	synthesized := false
+	// Repeat guard: the model re-proposed exactly what was just executed (its
+	// output is in the history). Don't run it again — make it move on.
+	if len(calls) > 0 && repeatsLastCalls(calls, req.Messages) && s.cfg.Enforce {
+		log.Printf("chat: model repeated the previous call(s) %s — nudging to continue", callNames(calls))
+		s.stats.Nudges.Add(1)
+		if t2, s2, err2 := s.graph.Send(ctx, convID, repeatNudge, contexts); err2 == nil {
+			if s.cfg.Thinking {
+				_, t2 = splitThinking(t2)
+			}
+			p2, c2, _, _ := extractToolCallsChecked(t2, known, schemas)
+			if len(c2) == 0 {
+				p2, c2 = extractTaggedCalls(t2, known, primaryArgs(req.Tools))
+			}
+			if !repeatsLastCalls(c2, req.Messages) {
+				text, sources, prose, calls, nudged = t2, s2, p2, c2, true
+			} else {
+				// Still looping: answer with the prose we have and stop the loop.
+				calls = nil
+				prose = strings.TrimSpace(p2)
+				if prose == "" {
+					prose = "The command was already executed; its output is shown above."
+				}
+				text = prose
+			}
+		}
+	}
 	if len(calls) == 0 && len(problems) == 0 && toolsOffered {
 		if sh := shellToolName(known); sh != "" {
 			if cmd := extractShellCommand(text); cmd != "" {
@@ -506,6 +532,57 @@ func recentUserText(msgs []oaiMessage, n int) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// repeatsLastCalls: every proposed call equals one of the most recent
+// assistant tool_calls, and those calls already have results in history.
+func repeatsLastCalls(calls []parsedCall, msgs []oaiMessage) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	// Find the last assistant message with tool_calls, and require tool
+	// results after it.
+	lastIdx := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && len(msgs[i].ToolCalls) > 0 {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx < 0 {
+		return false
+	}
+	haveResult := false
+	for _, m := range msgs[lastIdx+1:] {
+		if m.Role == "tool" {
+			haveResult = true
+		}
+		if m.Role == "user" {
+			return false // a new user ask in between: not a repeat
+		}
+	}
+	if !haveResult {
+		return false
+	}
+	prev := map[string]bool{}
+	for _, tc := range msgs[lastIdx].ToolCalls {
+		prev[tc.Function.Name+"\x00"+canonJSON(tc.Function.Arguments)] = true
+	}
+	for _, c := range calls {
+		if !prev[c.Name+"\x00"+canonJSON(string(c.Args))] {
+			return false
+		}
+	}
+	return true
+}
+
+func canonJSON(s string) string {
+	var v any
+	if json.Unmarshal([]byte(s), &v) != nil {
+		return strings.TrimSpace(s)
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 // instrBytes: where the prompt size goes, by instruction block.

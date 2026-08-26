@@ -547,3 +547,29 @@ func TestTaggedFenceCalls(t *testing.T) {
 		t.Fatalf("tagged fence not turned into tool_call: %+v", out)
 	}
 }
+
+func TestRepeatGuard(t *testing.T) {
+	n := 0
+	g := newFakeGraph(t, func(p string) string {
+		n++
+		if strings.Contains(p, "proposed the same command again") {
+			return "On branch main, clean tree."
+		}
+		return "```bash\ngit status --short --branch\n```"
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	hist := `{"model":"m365-copilot",` + tools + `,"messages":[{"role":"user","content":"use git status"},
+	 {"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"git status --short --branch\"}"}}]},
+	 {"role":"tool","tool_call_id":"c1","content":"## main...origin/main"}]}`
+	_, out := post(t, p.URL, hist)
+	if n != 2 || *out.Choices[0].FinishReason != "stop" || string(out.Choices[0].Message.Content) != "On branch main, clean tree." {
+		t.Fatalf("repeat guard: sends=%d out=%+v", n, out.Choices[0].Message)
+	}
+	// A different command is not a repeat.
+	msgs := []oaiMessage{{Role: "assistant", ToolCalls: []oaiToolCall{{Function: oaiFunctionCall{Name: "bash", Arguments: `{"command":"ls"}`}}}}, {Role: "tool", Content: "a"}}
+	if repeatsLastCalls([]parsedCall{{Name: "bash", Args: json.RawMessage(`{"command":"ls -la"}`)}}, msgs) {
+		t.Error("different args flagged as repeat")
+	}
+}

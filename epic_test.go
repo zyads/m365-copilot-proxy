@@ -649,3 +649,18 @@ func TestTaskFenceFillsAllRequired(t *testing.T) {
 		t.Errorf("catalog: %s", cat)
 	}
 }
+
+// After runner output exists, "I searched the repo and found X" is TRUE and
+// must not be nudged; an outright refusal still is.
+func TestFabricationTellsSuspendedAfterAction(t *testing.T) {
+	legit := "I searched the repository and found the target defined in ext/inc/BUILD.bazel:1461. The current directory is the FC repo. Here is the minimal fix."
+	if nudgeReason(legit, true, 0, false) == "" {
+		t.Error("before any action this should be treated as fabrication")
+	}
+	if r := nudgeReason(legit, true, 0, true); r != "" {
+		t.Errorf("after action this is legitimate, got %q", r)
+	}
+	if r := nudgeReason("I can't access the repository; please paste the file.", true, 0, true); r != "refusal" {
+		t.Errorf("refusal must still nudge after action, got %q", r)
+	}
+}

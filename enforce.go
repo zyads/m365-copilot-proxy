@@ -85,14 +85,28 @@ func safetyBlocked(reply string) bool {
 // needsNudge reports whether a tool-less reply looks like a refusal or a
 // narrated non-action when tools were available.
 func needsNudge(reply string, toolsOffered bool, calls int) bool {
+	return nudgeReason(reply, toolsOffered, calls, false) != ""
+}
+
+// nudgeReason names the rule that fires, or "". `acted` = the conversation
+// already contains runner output; then "I searched the repo and found…" is
+// a true statement, so fabrication tells are suspended and only outright
+// refusals ("can't access", "paste it to me") still count.
+func nudgeReason(reply string, toolsOffered bool, calls int, acted bool) string {
 	if !toolsOffered || calls > 0 {
-		return false
+		return ""
 	}
 	r := strings.TrimSpace(reply)
 	if r == "" {
-		return true
+		return "empty"
 	}
-	return refusalTells.MatchString(r) || hallucinationTells.MatchString(r)
+	if refusalTells.MatchString(r) {
+		return "refusal"
+	}
+	if !acted && hallucinationTells.MatchString(r) {
+		return "fabrication"
+	}
+	return ""
 }
 
 const repeatNudge = `That command was already run; its output is in the previous message. Rather than repeating it, please either answer the developer in plain prose (no fenced command blocks) or propose the next, different command.`

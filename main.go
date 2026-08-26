@@ -325,12 +325,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
+	nudgeWhy := ""
 	synthesized := false
+	acted := hasToolResult(req.Messages)
 	// Repeat guard: the model re-proposed exactly what was just executed (its
 	// output is in the history). Don't run it again — make it move on.
 	if len(calls) > 0 && repeatsLastCalls(calls, req.Messages) && s.cfg.Enforce {
 		log.Printf("chat: model repeated the previous call(s) %s — nudging to continue", callNames(calls))
 		s.stats.Nudges.Add(1)
+		nudgeWhy = "repeat"
 		if t2, s2, err2 := s.graph.Send(ctx, convID, repeatNudge, contexts); err2 == nil {
 			if s.cfg.Thinking {
 				_, t2 = splitThinking(t2)
@@ -369,17 +372,21 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case len(calls) == 0 && len(problems) > 0:
 			nudge = repairNudge(problems)
+			nudgeWhy = "invalid-args"
 			s.stats.RepairFailures.Add(1)
 			log.Printf("chat: invalid tool args (%s) — re-prompting", strings.Join(problems, "; "))
-		case needsNudge(text, true, len(calls)):
+		case nudgeReason(text, true, len(calls), acted) != "":
 			nudge = enforceNudgeFor(root)
-			log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
+			nudgeWhy = nudgeReason(text, true, len(calls), acted)
+			log.Printf("chat: %s — nudging once", nudgeWhy)
 		case !reuse && !hasAssistantTurn(turns) && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
 			nudge = enforceNudgeFor(root)
+			nudgeWhy = "first-turn-no-action"
 			log.Printf("chat: first turn answered a task without any tool call — nudging once")
 		case len(mentionedButUncalled(recentUserText(turns, 3), known, calls)) > 0:
 			m := mentionedButUncalled(recentUserText(turns, 3), known, calls)
 			nudge = mentionNudge(m)
+			nudgeWhy = "named-tool-uncalled"
 			log.Printf("chat: user named tool(s) %v, reply didn't call them — nudging once", m)
 		}
 		if nudge != "" {
@@ -416,7 +423,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.stats.setLast(map[string]any{
 		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_names": sortedKeys(known),
 		"tool_calls": len(calls), "called": callNames(calls), "problems": problems,
-		"nudged": nudged, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "primed": primed, "prompt_bytes": len(prompt),
+		"nudged": nudged, "nudge_reason": nudgeWhy, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "primed": primed, "prompt_bytes": len(prompt),
 		"instr_bytes":     instrBytes(instr),
 		"instructions_in": map[bool]string{true: "message", false: "contexts"}[s.cfg.InstrInMessage],
 		"reply_head":      redact(truncate([]byte(text), 240)),
@@ -692,6 +699,15 @@ func primaryArgs(tools []oaiTool) map[string]string {
 		out[t.Function.Name] = primaryArg(t.Function.Parameters)
 	}
 	return out
+}
+
+func hasToolResult(msgs []oaiMessage) bool {
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAssistantTurn(msgs []oaiMessage) bool {

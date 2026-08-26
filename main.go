@@ -154,7 +154,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	toolInstr := func(fresh bool) graphContext {
 		text := toolProtocol + renderToolCatalog(req.Tools)
 		if !fresh {
-			text = renderToolReminder(req.Tools, root, lastUserMessage(turns))
+			text = renderToolReminder(req.Tools, root, recentUserText(turns, 3))
 		}
 		return graphContext{Description: "Tool-calling protocol. You MUST follow it exactly.", Text: text}
 	}
@@ -278,8 +278,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		case !reuse && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
 			nudge = enforceNudgeFor(root)
 			log.Printf("chat: first turn answered a task without any tool call — nudging once")
-		case len(mentionedButUncalled(lastUserMessage(turns), known, calls)) > 0:
-			m := mentionedButUncalled(lastUserMessage(turns), known, calls)
+		case len(mentionedButUncalled(recentUserText(turns, 3), known, calls)) > 0:
+			m := mentionedButUncalled(recentUserText(turns, 3), known, calls)
 			nudge = mentionNudge(m)
 			log.Printf("chat: user named tool(s) %v, reply didn't call them — nudging once", m)
 		}
@@ -474,6 +474,18 @@ func mentionedButUncalled(userMsg string, known map[string]bool, calls []parsedC
 		}
 	}
 	return out
+}
+
+// recentUserText joins the last n user messages — a follow-up like "list"
+// inherits the tools named two turns earlier ("use localmemory mcp").
+func recentUserText(msgs []oaiMessage, n int) string {
+	var parts []string
+	for i := len(msgs) - 1; i >= 0 && len(parts) < n; i-- {
+		if msgs[i].Role == "user" {
+			parts = append(parts, string(msgs[i].Content))
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func lastUserMessage(msgs []oaiMessage) string {

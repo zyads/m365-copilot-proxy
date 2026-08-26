@@ -339,19 +339,19 @@ func sortedKeys(m map[string]bool) []string {
 }
 
 // mentionedTools returns known tool names (or MCP server prefixes) that the
-// user's message explicitly refers to — "use local-memory", "call todoread".
+// user's text explicitly refers to — "use local-memory", "localmemory mcp",
+// "call todoread". Matching is punctuation-insensitive on both sides.
 func mentionedTools(userMsg string, known map[string]bool) []string {
-	low := strings.ToLower(userMsg)
+	low := squash(userMsg)
 	var out []string
 	seen := map[string]bool{}
 	for k := range known {
 		lk := strings.ToLower(k)
-		// Full name, or the MCP server prefix before the first '_' (e.g. "local-memory").
 		prefix := lk
 		if i := strings.Index(lk, "_"); i > 2 {
 			prefix = lk[:i]
 		}
-		if wordIn(low, lk) || (len(prefix) >= 4 && wordIn(low, prefix)) {
+		if nameIn(low, lk) || (len(prefix) >= 4 && nameIn(low, prefix)) {
 			if !seen[k] {
 				out = append(out, k)
 				seen[k] = true
@@ -360,6 +360,31 @@ func mentionedTools(userMsg string, known map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// nameIn: does the (squashed) text mention name, written either joined
+// ("localmemory") or with the joiners as spaces ("local memory")?
+func nameIn(low, name string) bool {
+	joined := squash(name)
+	spaced := strings.Join(strings.FieldsFunc(strings.ToLower(name), func(r rune) bool { return r == '-' || r == '_' || r == '.' }), " ")
+	return wordIn(low, joined) || (spaced != joined && wordIn(low, spaced))
+}
+
+// squash lowercases and collapses punctuation so "local-memory", "local_memory"
+// and "localmemory" all compare equal, while word boundaries survive as spaces.
+func squash(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			// joiners inside a name: drop
+		default:
+			b.WriteRune(' ')
+		}
+	}
+	return b.String()
 }
 
 // wordIn: needle appears in hay bounded by non-alphanumerics (so "read"

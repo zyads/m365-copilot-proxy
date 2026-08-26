@@ -40,7 +40,10 @@ var hallucinationTells = regexp.MustCompile(`(?i)` +
 	`|\b(?:give|provide|tell|share|send|paste|point) me (?:the |a |your )?(?:exact )?(?:repo(?:sitory)?|path|branch|directory|folder|file|url|name|location)\b` +
 	`|\b(?:which|what) (?:repo(?:sitory)?|directory|folder|branch|path) (?:are you|is (?:it|this)|should i|do you)\b` +
 	`|\b(?:once|if|when) you (?:give|provide|tell|share|send|point) me\b` +
-	`|organization'?s? polic|access restrictions|learn\.microsoft\.com`)
+	`|organization'?s? polic|access restrictions|learn\.microsoft\.com` +
+	`|\bno (?:accessible |available |such )?[\w\-. ]{0,40}tools? (?:is |are )?(?:available|exposed|accessible|present|provided)\b` +
+	`|\b(?:not|isn'?t|aren'?t) (?:available|exposed|accessible|provided|enabled) (?:in|for|to) (?:this|the current|my) (?:session|chat|conversation|context|toolset|environment)\b` +
+	`|\btool(?:set)? (?:isn'?t|is not|aren'?t|are not) (?:exposed|available|accessible)\b`)
 
 // enforceNudgeFor names the repo root when known — the model most often
 // refuses because it has lost track of WHERE it is.

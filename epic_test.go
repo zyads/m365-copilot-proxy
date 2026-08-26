@@ -422,3 +422,28 @@ func TestNoAnswerNudges(t *testing.T) {
 		t.Fatalf("sends=%d finish=%s content=%.80q", n, *out.Choices[0].FinishReason, out.Choices[0].Message.Content)
 	}
 }
+
+func TestMentionNormalisedAndRecent(t *testing.T) {
+	known := map[string]bool{"local-memory_list": true, "local-memory_recall": true, "read": true}
+	for _, msg := range []string{"use localmemory mcp", "use local_memory", "the LOCAL-MEMORY server", "local memory please"} {
+		if got := mentionedTools(msg, known); len(got) != 2 {
+			t.Errorf("%q → %v", msg, got)
+		}
+	}
+	if got := mentionedTools("read the docs then proceed", known); len(got) != 1 || got[0] != "read" {
+		t.Errorf("read: %v", got)
+	}
+	turns := []oaiMessage{{Role: "user", Content: "use localmemory mcp"}, {Role: "assistant", Content: "what op?"}, {Role: "user", Content: "list"}}
+	if !strings.Contains(recentUserText(turns, 3), "localmemory") {
+		t.Error("recent text lost earlier turn")
+	}
+	for _, txt := range []string{
+		"I can't list local-memory entries from here because no accessible local-memory tool is available in this session.",
+		"That tool isn't exposed in this session's toolset.",
+		"The local-memory tools are not available in the current context.",
+	} {
+		if !needsNudge(txt, true, 0) {
+			t.Errorf("should nudge: %q", txt)
+		}
+	}
+}

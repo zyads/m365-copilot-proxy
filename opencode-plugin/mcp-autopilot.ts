@@ -144,7 +144,8 @@ export const McpAutopilot: Plugin = async ({ client }) => {
         },
       }),
       mcp_enable: tool({
-        description: "Connect an MCP server so its tools become available on your NEXT turn. Use mcp_list to see names.",
+        description:
+          "Connect an MCP server. Its tools become available only on the developer's NEXT message (not this turn). After enabling, end the turn with a one-line status and ask the developer to say 'continue'. Use mcp_list to see names.",
         args: { server: tool.schema.string().describe("server name as shown by mcp_list") },
         async execute({ server }) {
           const st = await statuses()
@@ -152,7 +153,10 @@ export const McpAutopilot: Plugin = async ({ client }) => {
           lastUsed.set(server, turn)
           if (connected(st, server)) return `${server} already connected`
           await client.mcp.connect({ path: { name: server } })
-          return `${server} connected — its tools are available from your next turn; continue.`
+          return (
+            `${server} connected. IMPORTANT: its tools are NOT available in this turn — the tool list is rebuilt only when the developer sends the next message. ` +
+            `Do not improvise a substitute (CLI, guesses). Finish this turn now with one short line saying "${server} enabled — say 'continue' and I'll use it", then stop.`
+          )
         },
       }),
       mcp_disable: tool({

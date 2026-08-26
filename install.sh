@@ -18,7 +18,22 @@ CONF_DIR="$HOME/.config/m365-copilot-proxy"
 ENV_FILE="$CONF_DIR/env"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; }; }
-need git; need go; need curl
+need git; need curl
+
+# Find go even when it isn't on the interactive PATH (same search as the
+# proxy's self-updater): GO_BIN from the env file, then well-known dirs.
+find_go() {
+  command -v go >/dev/null 2>&1 && return 0
+  local envf="$HOME/.config/m365-copilot-proxy/env" d
+  [ -f "$envf" ] && d="$(sed -n 's/^GO_BIN=//p' "$envf" | tail -1)" && [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
+  for d in /usr/local/go/bin /usr/lib/go/bin /usr/lib/go-1.2[2-9]/bin /opt/homebrew/bin /snap/bin "$HOME/go/bin" "$HOME/.go/bin" "$HOME/sdk"/go*/bin "$HOME/.local/go/bin" /opt/go/bin; do
+    [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
+  done
+  return 1
+}
+find_go || { echo "missing: go (not on PATH; set GO_BIN=/dir/containing/go in ~/.config/m365-copilot-proxy/env or run: GO_BIN=/path bash install.sh)" >&2; exit 1; }
+[ -n "${GO_BIN:-}" ] && [ -x "$GO_BIN/go" ] && export PATH="$GO_BIN:$PATH"
+echo "== go: $(command -v go) ($(go version | awk '{print $3}'))"
 
 # --- checkout ---------------------------------------------------------------
 if [ -d "$INSTALL_DIR/.git" ]; then

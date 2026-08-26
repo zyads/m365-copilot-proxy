@@ -25,7 +25,11 @@ need git; need curl
 find_go() {
   command -v go >/dev/null 2>&1 && return 0
   local envf="$HOME/.config/m365-copilot-proxy/env" d
-  [ -f "$envf" ] && d="$(sed -n 's/^GO_BIN=//p' "$envf" | tail -1)" && [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
+  if [ -f "$envf" ]; then
+    d="$(sed -n 's/^GO_BIN=//p' "$envf" | tail -1)"; [ -n "$d" ] && [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
+    # Older env files carry the go dir as the first PATH entry.
+    d="$(sed -n 's/^PATH=\([^:]*\).*/\1/p' "$envf" | tail -1)"; [ -n "$d" ] && [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
+  fi
   for d in /usr/local/go/bin /usr/lib/go/bin /usr/lib/go-1.2[2-9]/bin /opt/homebrew/bin /snap/bin "$HOME/go/bin" "$HOME/.go/bin" "$HOME/sdk"/go*/bin "$HOME/.local/go/bin" /opt/go/bin; do
     [ -x "$d/go" ] && { export PATH="$d:$PATH"; return 0; }
   done

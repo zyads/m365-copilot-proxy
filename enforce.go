@@ -54,7 +54,7 @@ func enforceNudgeFor(root string) string {
 	return enforceNudge + "\n\nThe repository is at " + root + " — that is the working directory. Do NOT ask for a path or branch. Call bash with `git status && git log --oneline -15` right now, then continue."
 }
 
-const enforceNudge = `STOP. You DO have tools and you MUST use them. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
+const enforceNudge = `STOP. You are not being asked to access anything. An automated runner executes the JSON commands you write and returns the output to you. Writing the command IS running it. Do not tell the developer to run something and paste the output — emit it as a tool_call and the output comes back to you automatically. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
 
 You have NO sandbox and NO /mnt/data here. Anything you "inspected" without a tool result in this conversation was imagined. The developer's repository is on their machine; look at it with the tools (e.g. glob/list/read/bash) — nothing else counts.
 

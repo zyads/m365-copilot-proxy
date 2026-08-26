@@ -236,7 +236,7 @@ func TestEnforceNudge(t *testing.T) {
 	n := 0
 	g := newFakeGraph(t, func(p string) string {
 		n++
-		if strings.Contains(p, "STOP. You DO have tools") {
+		if strings.HasPrefix(p, "STOP.") {
 			return "```tool_call\n{\"name\":\"read\",\"arguments\":{\"path\":\"x\"}}\n```"
 		}
 		return "I'm sorry, but I don't have access to your files. Could you paste the contents?"
@@ -325,7 +325,7 @@ func TestFirstTurnTaskNudge(t *testing.T) {
 	n := 0
 	g := newFakeGraph(t, func(p string) string {
 		n++
-		if strings.Contains(p, "STOP. You DO have tools") {
+		if strings.HasPrefix(p, "STOP.") {
 			return "```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}\n```"
 		}
 		return "This repository is a Go web service with a clean architecture."

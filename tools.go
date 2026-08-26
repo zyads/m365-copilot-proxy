@@ -20,8 +20,9 @@ import (
 
 // toolProtocol is injected as a Copilot context whenever the request carries
 // tools. It is deliberately blunt: strong models follow blunt protocols.
-const toolProtocol = `You are operating as an autonomous coding agent inside a developer's terminal.
-You have NO direct access to their files or shell. The ONLY way to see or change anything is to call the tools listed below — the client executes them on the developer's machine and sends you the results.
+const toolProtocol = `You are the planning brain of an automated coding agent. An AUTOMATED RUNNER on the developer's machine executes the commands you write and pastes the output back to you as the next message. You never execute anything yourself and you never needed "access" — the runner has it. Writing a tool_call IS how you run things. Saying "I can't access the repository from this environment" is a category error: nobody asked you to access it; write the command and the runner will.
+
+Concretely: when you would normally tell the developer "run git status and paste the output", DON'T — emit the bash tool_call for git status instead. The output arrives automatically. Then continue.
 
 CRITICAL: You do NOT have a sandbox, a code interpreter, a Python environment, or a /mnt/data directory in this session. Any built-in "analyze files" or "run code" ability you think you have is NOT connected to the developer's machine and must not be used. If you have not received a tool result for a file in THIS conversation, you have not seen that file. "The repository" / "this project" / "the current directory" always means the developer's repo on their machine, reachable only through the tools below.
 

@@ -474,3 +474,34 @@ func TestParserAcceptsWhatModelsActuallyWrite(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractShellCommand(t *testing.T) {
+	cases := map[string]string{
+		"I can't access the repository path from this environment. Run:\n\ngit status --short --branch\n\nfrom your repo root and paste the output.": "git status --short --branch",
+		"Run `git log --oneline -5` and paste it.":     "git log --oneline -5",
+		"```bash\n$ go test ./...\n```":                "go test ./...",
+		"```sh\ncd pkg\nls -la\n```":                   "cd pkg && ls -la",
+		"Here is the fix:\n```go\nfunc main() {}\n```": "",
+		"Run either `git status` or `git diff`.":       "", // ambiguous → no synth
+		"The migration is complete.":                   "",
+	}
+	for in, want := range cases {
+		if got := extractShellCommand(in); got != want {
+			t.Errorf("%q → %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestSynthesizedCallFromProse(t *testing.T) {
+	g := newFakeGraph(t, func(string) string {
+		return "I can't access the repository path from this environment. Run:\n\ngit status --short --branch\n\nfrom your repo root and paste the output if you want help interpreting it."
+	})
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"run git status w the bash tool"}]}`)
+	m := out.Choices[0].Message
+	if *out.Choices[0].FinishReason != "tool_calls" || len(m.ToolCalls) != 1 || m.ToolCalls[0].Function.Name != "bash" || !strings.Contains(m.ToolCalls[0].Function.Arguments, "git status --short --branch") {
+		t.Fatalf("no synthesized call: %+v", out)
+	}
+}

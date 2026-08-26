@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -265,6 +266,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	prose, calls, problems, repaired := extractToolCallsChecked(text, known, schemas)
 	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
+	synthesized := false
+	if len(calls) == 0 && len(problems) == 0 && toolsOffered {
+		if sh := shellToolName(known); sh != "" {
+			if cmd := extractShellCommand(text); cmd != "" {
+				// It told the developer to run a command: run it for them.
+				calls = []parsedCall{{Name: sh, Args: json.RawMessage(`{"command":` + strconv.Quote(cmd) + `}`)}}
+				prose = ""
+				synthesized = true
+				s.stats.Synth.Add(1)
+				log.Printf("chat: synthesized %s call from prose: %q", sh, cmd)
+			}
+		}
+	}
 	if s.cfg.Enforce && toolsOffered {
 		var nudge string
 		switch {
@@ -312,7 +326,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.debugDump(id, convID, prompt, instr, text, len(calls), nudged)
 	s.stats.setLast(map[string]any{
 		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_calls": len(calls),
-		"nudged": nudged, "utility": utility, "reuse": reuse, "prompt_bytes": len(prompt),
+		"nudged": nudged, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "prompt_bytes": len(prompt),
 		"instructions_in": map[bool]string{true: "message", false: "contexts"}[s.cfg.InstrInMessage],
 		"reply_head":      redact(truncate([]byte(text), 240)),
 	})

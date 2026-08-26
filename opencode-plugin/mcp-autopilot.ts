@@ -105,7 +105,8 @@ export const McpAutopilot: Plugin = async ({ client }) => {
       }
     }
     initialised = true
-    if (log.length) console.error(`[mcp-autopilot] ${reason}: ${log.join(" ")}`)
+    // stderr lands inside the TUI; stay quiet unless asked.
+    if (log.length && process.env.MCP_AUTOPILOT_DEBUG) console.error(`[mcp-autopilot] ${reason}: ${log.join(" ")}`)
   }
 
   if (!cfg.enabled) return {}

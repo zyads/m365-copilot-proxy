@@ -108,9 +108,21 @@ func clip(s string, n int) string {
 
 func renderToolFull(t oaiTool, descMax int) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, clip(t.Function.Description, descMax))
-	if pa := primaryArg(t.Function.Parameters); pa != "" {
-		fmt.Fprintf(&sb, "Block body = %q. ", pa)
+	desc := t.Function.Description
+	if strings.Contains(desc, "Available agent types") && descMax < 2000 {
+		descMax = 2000 // the agent list is required to call it correctly
+	}
+	fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, clip(desc, descMax))
+	req := requiredArgs(t.Function.Parameters)
+	switch {
+	case len(req) > 1:
+		fmt.Fprintf(&sb, "Required (use a JSON body): %s. ", strings.Join(req, ", "))
+	case len(req) == 1:
+		fmt.Fprintf(&sb, "Block body = %q. ", req[0])
+	default:
+		if pa := primaryArg(t.Function.Parameters); pa != "" {
+			fmt.Fprintf(&sb, "Block body = %q. ", pa)
+		}
 	}
 	if len(t.Function.Parameters) > 0 {
 		fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactSchema(t.Function.Parameters))
@@ -210,6 +222,63 @@ func primaryArg(params json.RawMessage) string {
 	return ""
 }
 
+func requiredArgs(params json.RawMessage) []string {
+	var sc struct {
+		Required []string `json:"required"`
+	}
+	_ = json.Unmarshal(params, &sc)
+	return sc.Required
+}
+
+var agentTypeRe = regexp.MustCompile(`(?m)^\s*-\s*([A-Za-z][\w-]*)\s*:`)
+
+// fillArgs builds arguments for a bare (non-JSON) fence body. Single-arg
+// tools: body → that arg. Multi-arg tools: long-text args get the body,
+// "description" gets the first line, enums get their first value,
+// subagent_type gets the first agent listed in the tool description.
+func fillArgs(t oaiTool, body string) json.RawMessage {
+	var sc struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	_ = json.Unmarshal(t.Function.Parameters, &sc)
+	if len(sc.Required) <= 1 {
+		pa := primaryArg(t.Function.Parameters)
+		if pa == "" {
+			return json.RawMessage("{}")
+		}
+		b, _ := json.Marshal(map[string]string{pa: body})
+		return b
+	}
+	firstLine := strings.TrimSpace(strings.SplitN(body, "\n", 2)[0])
+	out := map[string]any{}
+	for _, r := range sc.Required {
+		var prop struct {
+			Enum    []any `json:"enum"`
+			Default any   `json:"default"`
+		}
+		_ = json.Unmarshal(sc.Properties[r], &prop)
+		switch {
+		case len(prop.Enum) > 0:
+			out[r] = prop.Enum[0]
+		case prop.Default != nil:
+			out[r] = prop.Default
+		case r == "subagent_type":
+			if m := agentTypeRe.FindStringSubmatch(t.Function.Description); m != nil {
+				out[r] = m[1]
+			} else {
+				out[r] = "general"
+			}
+		case r == "description" || r == "title" || r == "summary":
+			out[r] = clip(firstLine, 80)
+		default: // prompt, content, command, query, pattern, text, filePath …
+			out[r] = body
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
 // fence aliases: what models write → what OpenCode calls it.
 var fenceAlias = map[string]string{"sh": "bash", "shell": "bash", "zsh": "bash", "console": "bash", "terminal": "bash", "cat": "read", "file": "read", "search": "grep", "rg": "grep", "find": "glob", "ls": "list"}
 
@@ -217,7 +286,11 @@ var taggedFence = regexp.MustCompile("(?s)```[ \\t]*([A-Za-z][A-Za-z0-9_\\-.]*)[
 
 // extractTaggedCalls: ```<tool>\nbody``` → call. Body that is a JSON object
 // becomes the arguments; otherwise it becomes the tool's primary argument.
-func extractTaggedCalls(text string, known map[string]bool, primary map[string]string) (prose string, calls []parsedCall) {
+func extractTaggedCalls(text string, known map[string]bool, tools []oaiTool) (prose string, calls []parsedCall) {
+	byName := map[string]oaiTool{}
+	for _, t := range tools {
+		byName[t.Function.Name] = t
+	}
 	prose = text
 	for _, m := range taggedFence.FindAllStringSubmatch(text, -1) {
 		tag := strings.ToLower(m[1])
@@ -242,13 +315,7 @@ func extractTaggedCalls(text string, known map[string]bool, primary map[string]s
 			}
 		}
 		if args == nil {
-			pa := primary[name]
-			if pa == "" {
-				args = json.RawMessage("{}")
-			} else {
-				b, _ := json.Marshal(map[string]string{pa: body})
-				args = b
-			}
+			args = fillArgs(byName[name], body)
 		}
 		calls = append(calls, parsedCall{Name: name, Args: args})
 		prose = strings.Replace(prose, m[0], "", 1)

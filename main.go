@@ -308,9 +308,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	prose, calls, problems, repaired := extractToolCallsChecked(text, known, schemas)
 	if len(calls) == 0 && toolsOffered {
-		// Primary protocol form: ```<tool>\nbody``` blocks.
-		if p2, c2 := extractTaggedCalls(text, known, primaryArgs(req.Tools)); len(c2) > 0 {
-			prose, calls, problems = p2, c2, nil
+		// Primary protocol form: ```<tool>\nbody``` blocks — validated against
+		// the schema so a bad call becomes a re-prompt, not a client error.
+		if p2, c2 := extractTaggedCalls(text, known, req.Tools); len(c2) > 0 {
+			var ok []parsedCall
+			problems = nil
+			for _, c := range c2 {
+				if ps := validateArgs(c.Name, c.Args, schemas); len(ps) > 0 {
+					problems = append(problems, ps...)
+					continue
+				}
+				ok = append(ok, c)
+			}
+			prose, calls = p2, ok
 		}
 	}
 	s.stats.Repairs.Add(int64(repaired))
@@ -327,7 +337,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 			p2, c2, _, _ := extractToolCallsChecked(t2, known, schemas)
 			if len(c2) == 0 {
-				p2, c2 = extractTaggedCalls(t2, known, primaryArgs(req.Tools))
+				p2, c2 = extractTaggedCalls(t2, known, req.Tools)
 			}
 			if !repeatsLastCalls(c2, req.Messages) {
 				text, sources, prose, calls, nudged = t2, s2, p2, c2, true
@@ -383,7 +393,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				if s.cfg.Thinking {
 					r2think, t2 = splitThinking(t2)
 				}
-				if p2, c2, _, r2 := extractToolCallsChecked(t2, known, schemas); len(c2) > 0 {
+				p2, c2, _, r2 := extractToolCallsChecked(t2, known, schemas)
+				if len(c2) == 0 {
+					p2, c2 = extractTaggedCalls(t2, known, req.Tools)
+				}
+				if len(c2) > 0 {
 					text, sources, prose, calls, nudged = t2, s2, p2, c2, true
 					if r2think != "" {
 						reasoning = strings.TrimSpace(reasoning + "\n\n" + r2think)

@@ -523,8 +523,9 @@ func TestTaggedFenceCalls(t *testing.T) {
 	if pa["bash"] != "command" || pa["read"] != "filePath" || pa["todoread"] != "" {
 		t.Fatalf("primary args: %v", pa)
 	}
+	_ = pa
 	text := "Let me look.\n```bash\n$ git status --short --branch\n```\n```read\nsrc/main.go\n```\n```sh\ngo test ./...\n```\n```edit\n{\"filePath\":\"a.go\",\"oldString\":\"x\",\"newString\":\"y\"}\n```\n```go\nfunc main(){}\n```\n```todoread\n```"
-	prose, calls := extractTaggedCalls(text, known, pa)
+	prose, calls := extractTaggedCalls(text, known, ts)
 	want := []string{`bash {"command":"git status --short --branch"}`, `read {"filePath":"src/main.go"}`, `bash {"command":"go test ./..."}`, `edit {"filePath":"a.go","newString":"y","oldString":"x"}`, `todoread {}`}
 	if len(calls) != len(want) {
 		t.Fatalf("calls: %+v", calls)
@@ -619,5 +620,32 @@ func TestPriming(t *testing.T) {
 	}
 	if *out.Choices[0].FinishReason != "tool_calls" || g.convs != 1 {
 		t.Fatalf("priming broke the turn: %+v convs=%d", out, g.convs)
+	}
+}
+
+// A bare ```task body must become a valid multi-arg call (this exact failure
+// was seen live: SchemaError Missing key ["prompt"]).
+func TestTaskFenceFillsAllRequired(t *testing.T) {
+	task := mkTool("task", `{"type":"object","required":["description","prompt","subagent_type"],"properties":{"description":{"type":"string"},"prompt":{"type":"string"},"subagent_type":{"type":"string"},"command":{"type":"string"}}}`)
+	task.Function.Description = "Launch a subagent.\n\nAvailable agent types and the tools they have access to:\n- general: General-purpose agent\n- explore: read-only search\n"
+	ts := []oaiTool{task, mkTool("bash", `{"type":"object","required":["command"],"properties":{"command":{}}}`)}
+	known := map[string]bool{"task": true, "bash": true}
+	body := "Search the repository for the strings X and Y.\nReturn matching file paths and surrounding lines."
+	_, calls := extractTaggedCalls("```task\n"+body+"\n```", known, ts)
+	if len(calls) != 1 {
+		t.Fatalf("calls: %+v", calls)
+	}
+	var args map[string]string
+	json.Unmarshal(calls[0].Args, &args)
+	if args["prompt"] != body || args["subagent_type"] != "general" || args["description"] != "Search the repository for the strings X and Y." {
+		t.Errorf("args: %v", args)
+	}
+	if ps := validateArgs("task", calls[0].Args, parseSchemas(ts)); len(ps) != 0 {
+		t.Errorf("should validate: %v", ps)
+	}
+	// Catalog keeps the agent list and states the required keys.
+	cat := renderToolCatalog(ts)
+	if !strings.Contains(cat, "- explore: read-only search") || !strings.Contains(cat, "Required (use a JSON body): description, prompt, subagent_type") {
+		t.Errorf("catalog: %s", cat)
 	}
 }

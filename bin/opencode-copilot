@@ -56,11 +56,15 @@ done
 # Keep the two bin scripts current — the proxy self-updates the checkout,
 # but these are copies. Re-exec if this launcher itself changed.
 SELF="$(readlink -f "$0")"; BIN_DIR="$(dirname "$SELF")"
+# When invoked from the repo copy, refresh the installed copies instead.
+case "$BIN_DIR" in "$INSTALL_DIR"/bin) BIN_DIR="${BIN_DIR_OVERRIDE:-$HOME/.local/bin}";; esac
+mkdir -p "$BIN_DIR"
 for b in copilot-proxy opencode-copilot; do
   src="$INSTALL_DIR/bin/$b"; dst="$BIN_DIR/$b"
   if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
     install -m 755 "$src" "$dst"
-    [ "$b" = opencode-copilot ] && [ -z "${OC_RELAUNCHED:-}" ] && { echo "launcher: updated, relaunching…"; OC_RELAUNCHED=1 exec "$dst" "$@"; }
+    echo "launcher: refreshed $dst"
+    [ "$b" = opencode-copilot ] && [ -z "${OC_RELAUNCHED:-}" ] && [ "$dst" != "$SELF" ] && { echo "launcher: relaunching…"; OC_RELAUNCHED=1 exec "$dst" "$@"; }
   fi
 done
 

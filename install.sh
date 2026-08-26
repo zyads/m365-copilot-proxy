@@ -63,8 +63,8 @@ else echo "GO_BIN=$GO_BIN_DIR" >> "$ENV_FILE"; fi
 grep -q '^PATH=' "$ENV_FILE" || echo "PATH=$GO_BIN_DIR:$HOME/go/bin:/usr/local/bin:/usr/bin:/bin" >> "$ENV_FILE"
 
 # --- launcher + control script ---------------------------------------------
-install -m 755 "$INSTALL_DIR/bin/opencode-copilot" "$BIN_DIR/opencode-copilot"
-install -m 755 "$INSTALL_DIR/bin/copilot-proxy"    "$BIN_DIR/copilot-proxy"
+install -m 755 "$INSTALL_DIR/bin/opencode-copilot" "$BIN_DIR/opencode-copilot" && echo "== installed $BIN_DIR/opencode-copilot"
+install -m 755 "$INSTALL_DIR/bin/copilot-proxy"    "$BIN_DIR/copilot-proxy" && echo "== installed $BIN_DIR/copilot-proxy"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "!! add $BIN_DIR to your PATH";; esac
 
 # --- mcp-autopilot plugin (works for every model, not just Copilot) --------

@@ -553,7 +553,7 @@ func TestRepeatGuard(t *testing.T) {
 	n := 0
 	g := newFakeGraph(t, func(p string) string {
 		n++
-		if strings.Contains(p, "proposed the same command again") {
+		if strings.Contains(p, "was already run") {
 			return "On branch main, clean tree."
 		}
 		return "```bash\ngit status --short --branch\n```"
@@ -614,7 +614,7 @@ func TestPriming(t *testing.T) {
 	if len(prompts) != 2 || !strings.Contains(prompts[0], defaultPersona) || !strings.Contains(prompts[0], "### bash") || strings.Contains(prompts[0], "use git status") {
 		t.Fatalf("prime message wrong (%d prompts)", len(prompts))
 	}
-	if strings.Contains(prompts[1], defaultPersona) || !strings.Contains(prompts[1], "STANDING ORDERS") || !strings.Contains(prompts[1], "use git status") {
+	if strings.Contains(prompts[1], defaultPersona) || !strings.Contains(prompts[1], "Reminder for this turn") || !strings.Contains(prompts[1], "use git status") {
 		t.Fatalf("task message wrong: %.300q", prompts[1])
 	}
 	if *out.Choices[0].FinishReason != "tool_calls" || g.convs != 1 {

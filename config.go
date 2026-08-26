@@ -37,6 +37,7 @@ type Config struct {
 	InstrInMessage bool   // put persona/protocol/catalog in the message text (default on); off = Graph contexts[]
 	Sources        bool   // SOURCES=on keeps Copilot attributions/citations (default off: stripped)
 	Prime          bool   // PRIME=off disables the role-commitment turn on fresh conversations
+	SystemMax      int    // MAX_SYSTEM_PROMPT bytes of the client system prompt kept (head+tail)
 	TimeZone       string // locationHint.timeZone sent to Copilot
 	RequestTimeout time.Duration
 	ConvTTL        time.Duration // how long a Graph conversation is reused
@@ -98,6 +99,7 @@ func loadConfig() Config {
 		InstrInMessage: env("INSTRUCTIONS_IN", "message") != "contexts",
 		Sources:        env("SOURCES", "off") == "on",
 		Prime:          env("PRIME", "on") != "off",
+		SystemMax:      envInt("MAX_SYSTEM_PROMPT", 20000),
 		TimeZone:       env("M365_TIMEZONE", "UTC"),
 		RequestTimeout: 300 * time.Second,
 		ConvTTL:        2 * time.Hour,

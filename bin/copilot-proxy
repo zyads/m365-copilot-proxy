@@ -60,7 +60,7 @@ print("tool calls   :", t.get("tool_calls"), "->", t.get("called") or "(none)")
 print("problems     :", t.get("problems") or "(none)")
 print("prompt bytes :", t.get("prompt_bytes"), "| by block:", ", ".join(f"{k}={v}" for k,v in sorted((t.get("instr_bytes") or {}).items(), key=lambda kv:-kv[1])) or "n/a")
 print("reply head   :", (t.get("reply_head") or "").replace("\n"," / "))
-print("totals       : turns=%s nudges=%s repairs=%s replays=%s errors=%s p50=%sms" % (d.get("turns"),d.get("nudges"),d.get("arg_repairs"),d.get("conversation_replays"),d.get("errors"),d.get("latency_p50_ms")))
+print("totals       : turns=%s nudges=%s repairs=%s replays=%s primes=%s safety_blocks=%s errors=%s p50=%sms" % (d.get("turns"),d.get("nudges"),d.get("arg_repairs"),d.get("conversation_replays"),d.get("primes"),d.get("safety_blocks"),d.get("errors"),d.get("latency_p50_ms")))
 ' 2>/dev/null || curl -s "$URL/stats" ;;
   login)   (xdg-open "$URL/auth/login" 2>/dev/null || open "$URL/auth/login" 2>/dev/null || echo "open $URL/auth/login") ;;
   seed-token)

@@ -66,3 +66,16 @@ func foldHistory(msgs []oaiMessage, keep int) []oaiMessage {
 	}
 	return out
 }
+
+// capText keeps head+tail of an oversized block with a marker in between.
+func capText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	head := max * 3 / 4
+	tail := max - head
+	if i := strings.LastIndex(s[:head], "\n"); i > head/2 {
+		head = i
+	}
+	return s[:head] + "\n\n[... " + itoa(len(s)-head-tail) + " bytes of application instructions omitted for length ...]\n\n" + s[len(s)-tail:]
+}

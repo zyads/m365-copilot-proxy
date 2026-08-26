@@ -42,6 +42,7 @@ var hallucinationTells = regexp.MustCompile(`(?i)` +
 	`|\b(?:which|what) (?:repo(?:sitory)?|directory|folder|branch|path) (?:are you|is (?:it|this)|should i|do you)\b` +
 	`|\b(?:once|if|when) you (?:give|provide|tell|share|send|point) me\b` +
 	`|organization'?s? polic|access restrictions|learn\.microsoft\.com` +
+	`|can'?t chat about this|try a different topic|not able to (?:help|assist) with (?:that|this)` +
 	`|\bno (?:accessible |available |such )?[\w\-. ]{0,40}tools? (?:is |are )?(?:available|exposed|accessible|present|provided)\b` +
 	`|\b(?:not|isn'?t|aren'?t) (?:available|exposed|accessible|provided|enabled) (?:in|for|to) (?:this|the current|my) (?:session|chat|conversation|context|toolset|environment)\b` +
 	`|\btool(?:set)? (?:isn'?t|is not|aren'?t|are not) (?:exposed|available|accessible)\b`)
@@ -52,26 +53,16 @@ func enforceNudgeFor(root string) string {
 	if root == "" {
 		return enforceNudge
 	}
-	return enforceNudge + "\n\nThe repository is at " + root + " — that is the working directory. Do NOT ask for a path or branch. Call bash with `git status && git log --oneline -15` right now, then continue."
+	return enforceNudge + "\n\nThe repository is at " + root + " (the working directory), so there's no need to ask for a path or branch; a good first block is `git status && git log --oneline -15`."
 }
 
-const enforceNudge = `STOP. You executed something yourself, or said you cannot access the repository. Neither is your job. Commands need the developer's approval, so you only PROPOSE them; the runner on the developer's machine executes approved commands and returns the output. Reply with ONLY the fenced command block(s) you propose, nothing else, for example:
+const enforceNudge = `Quick correction: nobody needs you to access or run anything yourself; the runner on the developer's machine does that once a command is approved. Please reply with just the fenced command block(s) you'd like run, for example:
 
 ` + "```bash" + `
 git status --short --branch
 ` + "```" + `
 
-The output will be pasted back to you. Do not explain, do not ask the developer for anything. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
-
-You have NO sandbox and NO /mnt/data here. Anything you "inspected" without a tool result in this conversation was imagined. The developer's repository is on their machine; look at it with the tools (e.g. glob/list/read/bash) — nothing else counts.
-
-Emit the tool_call block(s) now, e.g.:
-
-` + "```tool_call" + `
-{"name": "<tool>", "arguments": { ... }}
-` + "```" + `
-
-Output only tool_call blocks in this reply.`
+The output will come back to you in the next message.`
 
 // taskShaped: a first message that cannot be answered honestly without
 // looking at the repo. Used only on fresh conversations.
@@ -81,6 +72,14 @@ var taskShaped = regexp.MustCompile(`(?i)\b(?:repo|repository|codebase|project|c
 // + no tool call = the model answered from nothing.
 func firstTurnNeedsNudge(userMsg string, toolsOffered bool, calls int) bool {
 	return toolsOffered && calls == 0 && len(strings.TrimSpace(userMsg)) > 0 && taskShaped.MatchString(userMsg)
+}
+
+// safetyBlocked: Microsoft's content/jailbreak classifier refused the turn.
+var safetyBlockRe = regexp.MustCompile(`(?i)can'?t chat about this|try a different topic|I'?m not able to (?:help|assist|talk) (?:with|about) (?:that|this)`)
+
+func safetyBlocked(reply string) bool {
+	r := strings.TrimSpace(reply)
+	return len(r) < 300 && safetyBlockRe.MatchString(r)
 }
 
 // needsNudge reports whether a tool-less reply looks like a refusal or a
@@ -96,4 +95,4 @@ func needsNudge(reply string, toolsOffered bool, calls int) bool {
 	return refusalTells.MatchString(r) || hallucinationTells.MatchString(r)
 }
 
-const repeatNudge = `You proposed the same command again. It was already executed and its output is in the previous message — read it. Do NOT repeat it. Either give the developer the answer in plain prose (no fenced command blocks), or propose the NEXT, different command.`
+const repeatNudge = `That command was already run; its output is in the previous message. Rather than repeating it, please either answer the developer in plain prose (no fenced command blocks) or propose the next, different command.`

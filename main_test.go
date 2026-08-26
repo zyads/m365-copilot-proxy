@@ -106,7 +106,7 @@ func TestPlainChat(t *testing.T) {
 	}
 	// Instructions live in the message text (persona, thinking, system), in order.
 	pr := g.prompts[0]
-	pi, ti, si, ci := strings.Index(pr, defaultPersona), strings.Index(pr, thinkingInstruction), strings.Index(pr, "You are terse."), strings.Index(pr, "=== CONVERSATION ===")
+	pi, ti, si, ci := strings.Index(pr, defaultPersona), strings.Index(pr, thinkingInstruction), strings.Index(pr, "You are terse."), strings.Index(pr, "=== Conversation ===")
 	if pi < 0 || ti < pi || si < ti || ci < si {
 		t.Errorf("instruction order wrong: persona@%d thinking@%d system@%d conv@%d", pi, ti, si, ci)
 	}
@@ -145,7 +145,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if string(m.Content) != "Let me look." {
 		t.Errorf("prose should be stripped of blocks: %q", m.Content)
 	}
-	if pr := g.prompts[0]; !strings.Contains(pr, "### read") || !strings.Contains(pr, "### bash") || !strings.Contains(pr, "MANDATORY format") {
+	if pr := g.prompts[0]; !strings.Contains(pr, "### read") || !strings.Contains(pr, "### bash") || !strings.Contains(pr, "Proposing a command") {
 		t.Errorf("tool protocol missing from message: %.200q", pr)
 	}
 
@@ -163,7 +163,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 		t.Errorf("expected conversation reuse, created %d", g.convs)
 	}
 	// Turn 2 rides the reused conversation: names-only reminder, not the full catalog.
-	if tc2 := g.prompts[1]; strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") || strings.Contains(tc2, defaultPersona) || !strings.Contains(tc2, "STANDING ORDERS") {
+	if tc2 := g.prompts[1]; strings.Contains(tc2, "### read") || !strings.Contains(tc2, "read, bash") || strings.Contains(tc2, defaultPersona) || !strings.Contains(tc2, "Reminder for this turn") {
 		t.Errorf("reuse turn should carry a names-only reminder, got: %.300q", tc2)
 	}
 	if len(g.prompts) != 2 || strings.Contains(g.prompts[1], "what does main.go say?") || !strings.Contains(g.prompts[1], "Tool result [read]:\npackage main // hello") {
@@ -237,7 +237,7 @@ func TestEnforceNudge(t *testing.T) {
 	n := 0
 	g := newFakeGraph(t, func(p string) string {
 		n++
-		if strings.HasPrefix(p, "STOP.") {
+		if strings.HasPrefix(p, "Quick correction") {
 			return "```tool_call\n{\"name\":\"read\",\"arguments\":{\"path\":\"x\"}}\n```"
 		}
 		return "I'm sorry, but I don't have access to your files. Could you paste the contents?"
@@ -326,7 +326,7 @@ func TestFirstTurnTaskNudge(t *testing.T) {
 	n := 0
 	g := newFakeGraph(t, func(p string) string {
 		n++
-		if strings.HasPrefix(p, "STOP.") {
+		if strings.HasPrefix(p, "Quick correction") {
 			return "```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}\n```"
 		}
 		return "This repository is a Go web service with a clean architecture."

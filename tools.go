@@ -20,10 +20,11 @@ import (
 
 // toolProtocol is injected as a Copilot context whenever the request carries
 // tools. It is deliberately blunt: strong models follow blunt protocols.
-const toolProtocol = `You are the planning brain of an automated coding agent. You PROPOSE commands; the developer approves each one and a RUNNER on the developer's machine executes it, then pastes the output back to you as the next message. Because every command needs the developer's approval, you MUST NOT execute anything yourself: never use built-in code execution, Python, or a sandbox — they are not the developer's machine, running there is not approved, and their output is meaningless here. Your entire job on an action turn is to WRITE the proposal and stop.
+const toolProtocol = `## How the runner works
+You propose commands; the developer approves each one; the runner on the developer's machine executes it and pastes the output back to you as the next message. Because commands need approval, please do not execute anything yourself: write the proposal and stop. Your built-in code execution is not the developer's machine.
 
-## How to propose a command (MANDATORY format)
-Write a fenced block whose language tag is the runner command name and whose body is the argument:
+## Proposing a command (the format the runner understands)
+A fenced block whose language tag is the runner command name and whose body is the argument:
 
 ` + "```bash" + `
 git status --short --branch
@@ -37,21 +38,21 @@ src/main.go
 TODO
 ` + "```" + `
 
-Runner commands with several arguments take JSON instead:
+Runner commands with several arguments take a JSON body:
 
 ` + "```edit" + `
 {"filePath": "src/main.go", "oldString": "a - b", "newString": "a + b"}
 ` + "```" + `
 
-Rules:
-1. One block per command. Several blocks = several commands at once.
-2. When you write blocks, write ONLY blocks (one short line before them is fine). Then STOP — the approved output arrives in the next message. Never invent output, and never report results of running something yourself (you must not run anything).
-3. Do not ask the developer to run anything or paste anything. Do not say you "cannot access" or "don't have access to" the repository — access is not your job; proposing is. Write the block and stop.
-4. Read before editing; run the build/tests before claiming success.
-5. When the task is DONE, answer in plain prose with NO fenced command blocks (use inline code instead). A fenced bash block in a reply means "run this now".
-6. Think briefly before acting; a few precise commands beat many speculative ones.
-7. Resuming ("continue", "where we left off"): FIRST write bash blocks for git status and git log -20, read AGENTS.md / TODO / NOTES / plan docs, then continue. Chat history, Teams, mail and "records" are never the source of truth for repo state.
-8. If a todowrite/todoread runner command exists: on any task with 3+ steps, write the plan to it first and keep it updated.
+Guidelines:
+1. One block per command; several blocks propose several commands at once.
+2. On an action turn, write only the block(s) (one short line before them is fine), then stop; the approved output arrives in the next message. Please don't guess at output.
+3. There is no need to ask the developer to run or paste anything, and no need to mention access: proposing the command is the whole job.
+4. Read before editing; run the build or tests before reporting success.
+5. When the task is finished, reply in plain prose without fenced command blocks (inline code is fine). A fenced bash block always means "please run this".
+6. A brief think-through before acting helps; a few precise commands beat many speculative ones.
+7. Resuming work ("continue", "where we left off"): start with bash blocks for git status and git log -20, read AGENTS.md / TODO / NOTES / plan docs, then continue from the repository's actual state.
+8. If todowrite/todoread runner commands exist: on any task with 3+ steps, write the plan to it first and keep it updated.
 
 ## Runner commands available (tag = name; body = the argument named first, or JSON for several)
 `
@@ -112,10 +113,44 @@ func renderToolFull(t oaiTool, descMax int) string {
 		fmt.Fprintf(&sb, "Block body = %q. ", pa)
 	}
 	if len(t.Function.Parameters) > 0 {
-		fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactJSON(t.Function.Parameters))
+		fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactSchema(t.Function.Parameters))
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// compactSchema trims long per-property descriptions (OpenCode's bash/edit
+// schemas carry paragraphs); the model needs names, types, required.
+func compactSchema(raw json.RawMessage) string {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return compactJSON(raw)
+	}
+	var walk func(x any) any
+	walk = func(x any) any {
+		switch t := x.(type) {
+		case map[string]any:
+			for k, val := range t {
+				if k == "description" {
+					if str, ok := val.(string); ok && len(str) > 90 {
+						t[k] = clip(str, 90)
+					}
+					continue
+				}
+				t[k] = walk(val)
+			}
+			delete(t, "$schema")
+			delete(t, "additionalProperties")
+			return t
+		case []any:
+			for i := range t {
+				t[i] = walk(t[i])
+			}
+		}
+		return x
+	}
+	b, _ := json.Marshal(walk(v))
+	return string(b)
 }
 
 // renderToolCatalog scales from 5 tools to 500. Core tools always get full
@@ -230,12 +265,12 @@ func extractTaggedCalls(text string, known map[string]bool, primary map[string]s
 func renderToolReminder(tools []oaiTool, root, userMsg string) string {
 	g := groupTools(tools)
 	var sb strings.Builder
-	sb.WriteString("=== STANDING ORDERS (every turn) ===\n")
-	sb.WriteString("You are an autonomous coding agent in the developer's terminal. No sandbox, no /mnt/data, no Teams/mail/SharePoint/\"records\" — the repo on the developer's machine is the only source of truth, reachable ONLY via tools.\n")
+	sb.WriteString("=== Reminder for this turn ===\n")
+	sb.WriteString("You are the planning brain of the developer's coding agent; the repository on their machine is the subject, reached through the runner. Workplace data isn't relevant here.\n")
 	if root != "" {
-		sb.WriteString("Working directory (the repo): " + root + " — never ask for a path or branch; look with git status / ls / read.\n")
+		sb.WriteString("Working directory (the repository): " + root + "; inspect it with git status / ls / read rather than asking for a path.\n")
 	}
-	sb.WriteString("You do not run anything yourself (no built-in code execution / sandbox). To act, write fenced blocks tagged with the runner command name, body = argument, e.g. ```bash\ngit status\n``` or ```read\npath/to/file\n``` (JSON body for several arguments). Then STOP; the output comes back next message. Never ask the developer to run or paste anything. Plain prose with no fenced command blocks only when the task is DONE. Begin with a brief <thinking>…</thinking>.\n")
+	sb.WriteString("To act, propose fenced blocks tagged with the runner command name, body = argument, e.g. ```bash\ngit status\n``` or ```read\npath/to/file\n``` (JSON body for several arguments), then stop; the approved output comes back next message. Please don't execute anything yourself. Plain prose with no fenced command blocks when the task is finished. A brief <thinking>…</thinking> first is welcome.\n")
 	names := make([]string, 0, len(g.core))
 	for _, t := range g.core {
 		names = append(names, t.Function.Name)
@@ -264,7 +299,7 @@ func renderToolReminder(tools []oaiTool, root, userMsg string) string {
 			known[t.Function.Name] = true
 		}
 		if hit := mentionedTools(userMsg, known); len(hit) > 0 {
-			sb.WriteString("The developer referred to these tools — they ARE available; use them:\n")
+			sb.WriteString("The developer referred to these runner commands; they are available:\n")
 			byName := map[string]oaiTool{}
 			for _, t := range tools {
 				byName[t.Function.Name] = t
@@ -278,7 +313,7 @@ func renderToolReminder(tools []oaiTool, root, userMsg string) string {
 			}
 		}
 	}
-	sb.WriteString("=== END STANDING ORDERS ===")
+	sb.WriteString("=== End of reminder ===")
 	return sb.String()
 }
 
@@ -498,7 +533,7 @@ func wordIn(hay, needle string) bool {
 }
 
 func mentionNudge(names []string) string {
-	return "The developer explicitly asked you to use: " + strings.Join(names, ", ") + ". You did not call any of them. Call the appropriate one NOW with a ```tool_call block. Do not explain, do not ask — call it."
+	return "The developer asked for these runner commands: " + strings.Join(names, ", ") + ". Please propose the appropriate one as a fenced block tagged with its name (JSON body for several arguments), and nothing else."
 }
 
 func compactJSON(raw json.RawMessage) string {

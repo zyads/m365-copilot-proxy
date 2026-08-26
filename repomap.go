@@ -26,8 +26,8 @@ var skipDirs = map[string]bool{
 
 const (
 	mapMaxDepth   = 3
-	mapMaxEntries = 250
-	mapReadmeHead = 40
+	mapMaxEntries = 150
+	mapReadmeHead = 25
 	mapTTL        = 60 * time.Second
 )
 

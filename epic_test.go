@@ -447,3 +447,30 @@ func TestMentionNormalisedAndRecent(t *testing.T) {
 		}
 	}
 }
+
+func TestParserAcceptsWhatModelsActuallyWrite(t *testing.T) {
+	known := map[string]bool{"bash": true, "read": true}
+	cases := []string{
+		"```json\n{\"name\": \"bash\", \"arguments\": {\"command\": \"git status\"}}\n```",
+		"```\n{\"name\": \"bash\", \"arguments\": {\"command\": \"git status\"}}\n```",
+		"tool_call: {\"name\": \"bash\", \"arguments\": {\"command\": \"git status\"}}",
+		"Let me check.\n{\"name\": \"bash\", \"arguments\": {\"command\": \"git status\"}}\nWaiting.",
+		"```tool_call\n{\"name\":\"bash\",\"arguments\":{\"command\":\"git status\"}}\n```",
+	}
+	for _, c := range cases {
+		_, calls := extractToolCalls(c, known)
+		if len(calls) != 1 || calls[0].Name != "bash" {
+			t.Errorf("not parsed: %q → %+v", c, calls)
+		}
+	}
+	// Ordinary JSON / code fences must NOT become calls.
+	for _, c := range []string{
+		"```json\n{\"version\": 1, \"deps\": []}\n```",
+		"```go\nfunc main() {}\n```",
+		"config: {\"name\": \"app\"}",
+	} {
+		if _, calls := extractToolCalls(c, known); len(calls) != 0 {
+			t.Errorf("false positive: %q → %+v", c, calls)
+		}
+	}
+}

@@ -204,8 +204,13 @@ func renderToolReminder(tools []oaiTool, root, userMsg string) string {
 
 // Accept the fenced form and, leniently, an XML form some models drift into.
 var (
-	fencedCall = regexp.MustCompile("(?s)```(?:tool_call|tool|json\\s+tool_call)\\s*\\n(.*?)\\n\\s*```")
+	// The protocol form, plus what models actually write: ```json fences,
+	// bare fences, "tool_call" as a label line, XML, and a naked JSON
+	// object on its own line. All must contain "name" and "arguments".
+	fencedCall = regexp.MustCompile("(?s)```[ \\t]*(?:tool_call|tool|json[ \\t]*tool_call|json|javascript|)?[ \\t]*\\n(\\s*\\{.*?\\})\\s*\\n?\\s*```")
 	xmlCall    = regexp.MustCompile("(?s)<tool_call>\\s*(.*?)\\s*</tool_call>")
+	labelCall  = regexp.MustCompile("(?im)^[ \\t]*(?:tool_call|tool call|call|action)[ \\t]*:[ \\t]*(\\{.*\\})[ \\t]*$")
+	bareCall   = regexp.MustCompile("(?m)^[ \\t]*(\\{[^\\n]*\"name\"[^\\n]*\"arguments\"[^\\n]*\\})[ \\t]*$|^[ \\t]*(\\{[^\\n]*\"arguments\"[^\\n]*\"name\"[^\\n]*\\})[ \\t]*$")
 )
 
 type parsedCall struct {
@@ -224,9 +229,16 @@ func extractToolCalls(text string, known map[string]bool) (prose string, calls [
 
 func extractToolCallsChecked(text string, known map[string]bool, schemas map[string]toolSchema) (prose string, calls []parsedCall, problems []string, repaired int) {
 	prose = text
-	for _, re := range []*regexp.Regexp{fencedCall, xmlCall} {
+	for _, re := range []*regexp.Regexp{fencedCall, xmlCall, labelCall, bareCall} {
 		for _, m := range re.FindAllStringSubmatch(prose, -1) {
 			raw := strings.TrimSpace(m[1])
+			if raw == "" && len(m) > 2 {
+				raw = strings.TrimSpace(m[2])
+			}
+			// A fenced block that is ordinary JSON/code (no tool shape) is not a call.
+			if !strings.Contains(raw, "\"name\"") && !strings.Contains(raw, "'name'") && !strings.Contains(raw, "\"tool_call\"") {
+				continue
+			}
 			var pc parsedCall
 			if err := json.Unmarshal([]byte(raw), &pc); err != nil || pc.Name == "" {
 				// Some models wrap as {"tool_call": {...}} — unwrap once.

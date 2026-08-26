@@ -53,6 +53,17 @@ for _ in $(seq 1 900); do
   sleep 1
 done
 
+# Keep the two bin scripts current — the proxy self-updates the checkout,
+# but these are copies. Re-exec if this launcher itself changed.
+SELF="$(readlink -f "$0")"; BIN_DIR="$(dirname "$SELF")"
+for b in copilot-proxy opencode-copilot; do
+  src="$INSTALL_DIR/bin/$b"; dst="$BIN_DIR/$b"
+  if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
+    install -m 755 "$src" "$dst"
+    [ "$b" = opencode-copilot ] && [ -z "${OC_RELAUNCHED:-}" ] && { echo "launcher: updated, relaunching…"; OC_RELAUNCHED=1 exec "$dst" "$@"; }
+  fi
+done
+
 # Merge the m365 provider into the user's GLOBAL OpenCode config instead of
 # replacing it via OPENCODE_CONFIG — replacing it silently dropped every MCP
 # server / skill defined there ("not exposed in this session's toolset").

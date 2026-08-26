@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRepairJSON(t *testing.T) {
@@ -571,5 +572,24 @@ func TestRepeatGuard(t *testing.T) {
 	msgs := []oaiMessage{{Role: "assistant", ToolCalls: []oaiToolCall{{Function: oaiFunctionCall{Name: "bash", Arguments: `{"command":"ls"}`}}}}, {Role: "tool", Content: "a"}}
 	if repeatsLastCalls([]parsedCall{{Name: "bash", Args: json.RawMessage(`{"command":"ls -la"}`)}}, msgs) {
 		t.Error("different args flagged as repeat")
+	}
+}
+
+// The client echoes our assistant reply back WITHOUT reasoning_content and
+// with re-serialised arguments; reuse must still match.
+func TestReuseSurvivesClientEcho(t *testing.T) {
+	c := NewConvCache(time.Hour)
+	msgs := []oaiMessage{{Role: "user", Content: "use git status"}}
+	reply := oaiMessage{Role: "assistant", Reasoning: "think", Reasoning2: "think", Content: "",
+		ToolCalls: []oaiToolCall{{ID: "call_x_0", Type: "function", Function: oaiFunctionCall{Name: "bash", Arguments: `{"command":"git status"}`}}}}
+	c.Remember("conv-1", msgs, reply)
+	echoed := []oaiMessage{
+		{Role: "user", Content: "use git status"},
+		{Role: "assistant", Content: "", ToolCalls: []oaiToolCall{{ID: "call_x_0", Type: "function", Function: oaiFunctionCall{Name: "bash", Arguments: `{ "command" : "git status" }`}}}},
+		{Role: "tool", ToolCallID: "call_x_0", Content: "## main...origin/main"},
+	}
+	id, consumed := c.Lookup(echoed)
+	if id != "conv-1" || consumed != 2 {
+		t.Fatalf("reuse failed: id=%q consumed=%d", id, consumed)
 	}
 }

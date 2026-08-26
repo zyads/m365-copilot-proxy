@@ -33,11 +33,24 @@ func NewConvCache(ttl time.Duration) *ConvCache {
 	return &ConvCache{m: map[string]convEntry{}, ttl: ttl}
 }
 
+// prefixHash hashes a NORMALISED view of each message: role, trimmed text,
+// tool-call name+canonical args, tool-result text. Field-tested: hashing the
+// raw struct never matched, because the client echoes our assistant message
+// back without reasoning_content and with re-serialised arguments, so every
+// turn replayed the whole history into a fresh conversation.
 func prefixHash(msgs []oaiMessage) string {
 	h := sha256.New()
 	for _, m := range msgs {
-		b, _ := json.Marshal(m)
-		h.Write(b)
+		h.Write([]byte(m.Role))
+		h.Write([]byte{1})
+		h.Write([]byte(strings.TrimSpace(string(m.Content))))
+		h.Write([]byte{1})
+		for _, tc := range m.ToolCalls {
+			h.Write([]byte(tc.Function.Name))
+			h.Write([]byte{2})
+			h.Write([]byte(canonJSON(tc.Function.Arguments)))
+			h.Write([]byte{2})
+		}
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))

@@ -321,7 +321,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		case needsNudge(text, true, len(calls)):
 			nudge = enforceNudgeFor(root)
 			log.Printf("chat: reply refused/narrated instead of calling tools — nudging once")
-		case !reuse && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
+		case !reuse && !hasAssistantTurn(turns) && firstTurnNeedsNudge(lastUserMessage(turns), true, len(calls)):
 			nudge = enforceNudgeFor(root)
 			log.Printf("chat: first turn answered a task without any tool call — nudging once")
 		case len(mentionedButUncalled(recentUserText(turns, 3), known, calls)) > 0:
@@ -357,8 +357,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.debugDump(id, convID, prompt, instr, text, len(calls), nudged)
 	s.stats.setLast(map[string]any{
-		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_calls": len(calls),
+		"time": time.Now().Format(time.RFC3339), "tools_offered": len(req.Tools), "tool_names": sortedKeys(known),
+		"tool_calls": len(calls), "called": callNames(calls), "problems": problems,
 		"nudged": nudged, "synthesized_call": synthesized, "utility": utility, "reuse": reuse, "prompt_bytes": len(prompt),
+		"instr_bytes":     instrBytes(instr),
 		"instructions_in": map[bool]string{true: "message", false: "contexts"}[s.cfg.InstrInMessage],
 		"reply_head":      redact(truncate([]byte(text), 240)),
 	})
@@ -613,6 +615,15 @@ func primaryArgs(tools []oaiTool) map[string]string {
 		out[t.Function.Name] = primaryArg(t.Function.Parameters)
 	}
 	return out
+}
+
+func hasAssistantTurn(msgs []oaiMessage) bool {
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			return true
+		}
+	}
+	return false
 }
 
 func lastUserMessage(msgs []oaiMessage) string {

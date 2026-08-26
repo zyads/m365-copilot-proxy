@@ -17,6 +17,9 @@ var (
 	runNext    = regexp.MustCompile("(?im)\\b(?:run|execute|try)(?: this| the following| it)?[ \\t]*:[ \\t]*\\n\\s*\\n?[ \\t]*`?([a-z][^`\\n]{2,200}?)`?[ \\t]*$")
 	shellFence = regexp.MustCompile("(?s)```(?:bash|sh|shell|zsh|console|)[ \\t]*\\n(.*?)\\n[ \\t]*```")
 	inlineCmd  = regexp.MustCompile("(?i)\\brun\\s+`([^`\\n]{3,200})`")
+	// Its own sandbox attempts: "`git status` failed with:", "I ran git log …",
+	// "Running `go test`", "executed git status --short".
+	attempted  = regexp.MustCompile("(?im)^[ \\t]*`?([a-z][^`\\n]{2,200}?)`?[ \\t]+(?:failed|errored|returned|exited|produced)(?: with)?[ \\t]*:|(?i)\\b(?:i (?:ran|executed|tried|attempted)|running|executing|executed)[ \\t]+`?([a-z][^`\\n]{2,120}?)`?(?:[ \\t]+(?:and|but|which|in|from|,|\\.|:)|$)")
 	shellStart = regexp.MustCompile(`^(?:\$ )?(?:git|ls|cat|grep|rg|find|go|npm|pnpm|yarn|bun|node|python3?|pip|make|bazel|cargo|rustc|docker|kubectl|gh|curl|sed|awk|head|tail|wc|tree|pwd|cd|echo|test|pytest|mvn|gradle|dotnet|bash|sh)\b`)
 )
 
@@ -49,6 +52,13 @@ func extractShellCommand(reply string) string {
 	}
 	for _, m := range inlineCmd.FindAllStringSubmatch(reply, -1) {
 		cands = append(cands, strings.TrimSpace(m[1]))
+	}
+	for _, m := range attempted.FindAllStringSubmatch(reply, -1) {
+		for _, g := range m[1:] {
+			if g != "" {
+				cands = append(cands, strings.TrimSpace(g))
+			}
+		}
 	}
 	// Keep only things that look like shell, dedupe.
 	seen := map[string]bool{}

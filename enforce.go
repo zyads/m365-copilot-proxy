@@ -55,7 +55,7 @@ func enforceNudgeFor(root string) string {
 	return enforceNudge + "\n\nThe repository is at " + root + " — that is the working directory. Do NOT ask for a path or branch. Call bash with `git status && git log --oneline -15` right now, then continue."
 }
 
-const enforceNudge = `STOP. Do not run anything yourself and do not say you cannot access the repository — nobody asked you to. A runner on the developer's machine executes what you write. Reply with ONLY fenced command blocks, for example:
+const enforceNudge = `STOP. You executed something yourself, or said you cannot access the repository. Neither is your job. Commands need the developer's approval, so you only PROPOSE them; the runner on the developer's machine executes approved commands and returns the output. Reply with ONLY the fenced command block(s) you propose, nothing else, for example:
 
 ` + "```bash" + `
 git status --short --branch

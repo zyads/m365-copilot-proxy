@@ -1,12 +1,13 @@
 {
-  "// ": "copy to ~/.config/opencode/mcp-autopilot.json — every key optional",
+  "// ": "copy to ~/.config/opencode/mcp-autopilot.json — every key optional; server names must match your opencode.json mcp keys",
   "enabled": true,
   "always": ["local-memory"],
   "never": [],
   "rules": {
-    "\\b(pr|pull request|issue|github)\\b": ["github"],
-    "\\b(jira|ticket)\\b": ["jira"],
-    "\\b(remember|recall|memory|last time|where we left off)\\b": ["local-memory"]
+    "\\b(remember|recall|memory|last time|where we left off)\\b": ["local-memory"],
+    "\\b(pr|pull request|issue|ci|pipeline|workflow)\\b": ["github"],
+    "\\b(ticket|sprint|backlog)\\b": ["issue-tracker"],
+    "\\b(docs?|wiki|runbook)\\b": ["wiki"]
   },
   "idleTurns": 8,
   "disableUnmatched": true

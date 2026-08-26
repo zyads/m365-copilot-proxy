@@ -264,6 +264,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		reasoning, text = splitThinking(text)
 	}
 	prose, calls, problems, repaired := extractToolCallsChecked(text, known, schemas)
+	if len(calls) == 0 && toolsOffered {
+		// Primary protocol form: ```<tool>\nbody``` blocks.
+		if p2, c2 := extractTaggedCalls(text, known, primaryArgs(req.Tools)); len(c2) > 0 {
+			prose, calls, problems = p2, c2, nil
+		}
+	}
 	s.stats.Repairs.Add(int64(repaired))
 	nudged := false
 	synthesized := false
@@ -500,6 +506,36 @@ func recentUserText(msgs []oaiMessage, n int) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// instrBytes: where the prompt size goes, by instruction block.
+func instrBytes(instr []graphContext) map[string]int {
+	out := map[string]int{}
+	for _, c := range instr {
+		k := "other"
+		switch {
+		case strings.HasPrefix(c.Description, "Operating persona"):
+			k = "persona"
+		case strings.HasPrefix(c.Description, "Reply format"):
+			k = "thinking"
+		case strings.HasPrefix(c.Description, "System instructions"):
+			k = "system_prompt"
+		case strings.HasPrefix(c.Description, "Repository map"):
+			k = "repo_map"
+		case strings.HasPrefix(c.Description, "Tool-calling"):
+			k = "tool_catalog"
+		}
+		out[k] += len(c.Text)
+	}
+	return out
+}
+
+func primaryArgs(tools []oaiTool) map[string]string {
+	out := map[string]string{}
+	for _, t := range tools {
+		out[t.Function.Name] = primaryArg(t.Function.Parameters)
+	}
+	return out
 }
 
 func lastUserMessage(msgs []oaiMessage) string {

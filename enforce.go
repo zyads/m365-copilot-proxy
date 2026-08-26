@@ -31,6 +31,7 @@ var hallucinationTells = regexp.MustCompile(`(?i)` +
 	`|\b(?:there are|i (?:see|found|don'?t see|couldn'?t find)) (?:no|\d+|several|some) (?:files|folders|directories|entries)\b` +
 	`|\b(?:no|empty) (?:files|repository|repo|directory|folder) (?:were |was |is )?(?:found|available|present|detected)\b` +
 	`|\bunable to (?:locate|find|detect) (?:a |the |any )?(?:repository|repo|project|files)\b` +
+	`|\bcould not be (?:executed|run) (?:against|in|on)\b|\bpath is (?:unavailable|not available|missing)\b|\bcurrent directory is not a (?:git )?repo` +
 	`|\bfrom (?:the )?(?:records|our (?:chat|messages|conversation|exchange|thread))\b|\benterprise (?:sources?|search|data)\b` +
 	`|\b(?:in|from|via|searched|searching) (?:teams|sharepoint|onedrive|outlook|your (?:mailbox|email|inbox|calendar))\b` +
 	`|\b(?:based on|according to) (?:the )?(?:teams|chat|meeting|email) (?:messages?|history|transcripts?|threads?)\b` +
@@ -54,7 +55,13 @@ func enforceNudgeFor(root string) string {
 	return enforceNudge + "\n\nThe repository is at " + root + " — that is the working directory. Do NOT ask for a path or branch. Call bash with `git status && git log --oneline -15` right now, then continue."
 }
 
-const enforceNudge = `STOP. You are not being asked to access anything. An automated runner executes the JSON commands you write and returns the output to you. Writing the command IS running it. Do not tell the developer to run something and paste the output — emit it as a tool_call and the output comes back to you automatically. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
+const enforceNudge = `STOP. Do not run anything yourself and do not say you cannot access the repository — nobody asked you to. A runner on the developer's machine executes what you write. Reply with ONLY fenced command blocks, for example:
+
+` + "```bash" + `
+git status --short --branch
+` + "```" + `
+
+The output will be pasted back to you. Do not explain, do not ask the developer for anything. You are not allowed to ask the user for files, paths, or command output, and you are not allowed to describe what you would do — do it.
 
 You have NO sandbox and NO /mnt/data here. Anything you "inspected" without a tool result in this conversation was imagined. The developer's repository is on their machine; look at it with the tools (e.g. glob/list/read/bash) — nothing else counts.
 

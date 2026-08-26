@@ -505,3 +505,45 @@ func TestSynthesizedCallFromProse(t *testing.T) {
 		t.Fatalf("no synthesized call: %+v", out)
 	}
 }
+
+func TestTaggedFenceCalls(t *testing.T) {
+	ts := []oaiTool{
+		mkTool("bash", `{"type":"object","required":["command"],"properties":{"command":{},"timeout":{}}}`),
+		mkTool("read", `{"type":"object","required":["filePath"],"properties":{"filePath":{}}}`),
+		mkTool("grep", `{"type":"object","required":["pattern"],"properties":{"pattern":{},"path":{}}}`),
+		mkTool("edit", `{"type":"object","required":["filePath","oldString","newString"],"properties":{"filePath":{},"oldString":{},"newString":{}}}`),
+		mkTool("todoread", `{"type":"object","properties":{}}`),
+	}
+	known := map[string]bool{}
+	for _, x := range ts {
+		known[x.Function.Name] = true
+	}
+	pa := primaryArgs(ts)
+	if pa["bash"] != "command" || pa["read"] != "filePath" || pa["todoread"] != "" {
+		t.Fatalf("primary args: %v", pa)
+	}
+	text := "Let me look.\n```bash\n$ git status --short --branch\n```\n```read\nsrc/main.go\n```\n```sh\ngo test ./...\n```\n```edit\n{\"filePath\":\"a.go\",\"oldString\":\"x\",\"newString\":\"y\"}\n```\n```go\nfunc main(){}\n```\n```todoread\n```"
+	prose, calls := extractTaggedCalls(text, known, pa)
+	want := []string{`bash {"command":"git status --short --branch"}`, `read {"filePath":"src/main.go"}`, `bash {"command":"go test ./..."}`, `edit {"filePath":"a.go","newString":"y","oldString":"x"}`, `todoread {}`}
+	if len(calls) != len(want) {
+		t.Fatalf("calls: %+v", calls)
+	}
+	for i, c := range calls {
+		if got := c.Name + " " + string(c.Args); got != want[i] {
+			t.Errorf("call %d = %s want %s", i, got, want[i])
+		}
+	}
+	if !strings.Contains(prose, "func main(){}") || !strings.Contains(prose, "Let me look.") {
+		t.Errorf("ordinary code block must survive as prose: %q", prose)
+	}
+	// End-to-end: a ```bash reply becomes an OpenAI tool_call.
+	g := newFakeGraph(t, func(string) string { return "```bash\ngit status\n```" })
+	defer g.Close()
+	p := newProxy(t, g.URL)
+	defer p.Close()
+	_, out := post(t, p.URL, `{"model":"m365-copilot",`+tools+`,"messages":[{"role":"user","content":"status?"}]}`)
+	m := out.Choices[0].Message
+	if *out.Choices[0].FinishReason != "tool_calls" || len(m.ToolCalls) != 1 || m.ToolCalls[0].Function.Name != "bash" {
+		t.Fatalf("tagged fence not turned into tool_call: %+v", out)
+	}
+}

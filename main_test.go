@@ -144,7 +144,7 @@ func TestToolLoopWithConversationReuse(t *testing.T) {
 	if string(m.Content) != "Let me look." {
 		t.Errorf("prose should be stripped of blocks: %q", m.Content)
 	}
-	if pr := g.prompts[0]; !strings.Contains(pr, "### read") || !strings.Contains(pr, "### bash") || !strings.Contains(pr, "Tool-call protocol") {
+	if pr := g.prompts[0]; !strings.Contains(pr, "### read") || !strings.Contains(pr, "### bash") || !strings.Contains(pr, "MANDATORY format") {
 		t.Errorf("tool protocol missing from message: %.200q", pr)
 	}
 

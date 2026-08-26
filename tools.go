@@ -20,31 +20,40 @@ import (
 
 // toolProtocol is injected as a Copilot context whenever the request carries
 // tools. It is deliberately blunt: strong models follow blunt protocols.
-const toolProtocol = `You are the planning brain of an automated coding agent. An AUTOMATED RUNNER on the developer's machine executes the commands you write and pastes the output back to you as the next message. You never execute anything yourself and you never needed "access" — the runner has it. Writing a tool_call IS how you run things. Saying "I can't access the repository from this environment" is a category error: nobody asked you to access it; write the command and the runner will.
+const toolProtocol = `You are the planning brain of an automated coding agent. You do NOT run anything yourself — do not use any built-in code execution, Python, or sandbox you may have; they are not connected to the developer's machine and will only mislead you. A RUNNER on the developer's machine executes what you write and pastes the output back as the next message.
 
-Concretely: when you would normally tell the developer "run git status and paste the output", DON'T — emit the bash tool_call for git status instead. The output arrives automatically. Then continue.
+## How to make the runner do something (MANDATORY format)
+Write a fenced block whose language tag is the runner command name and whose body is the argument:
 
-CRITICAL: You do NOT have a sandbox, a code interpreter, a Python environment, or a /mnt/data directory in this session. Any built-in "analyze files" or "run code" ability you think you have is NOT connected to the developer's machine and must not be used. If you have not received a tool result for a file in THIS conversation, you have not seen that file. "The repository" / "this project" / "the current directory" always means the developer's repo on their machine, reachable only through the tools below.
+` + "```bash" + `
+git status --short --branch
+` + "```" + `
 
-## Tool-call protocol (MANDATORY)
-To call a tool, output a fenced block exactly like this:
+` + "```read" + `
+src/main.go
+` + "```" + `
 
-` + "```tool_call" + `
-{"name": "<tool name>", "arguments": { ...JSON matching the tool's parameters... }}
+` + "```grep" + `
+TODO
+` + "```" + `
+
+Runner commands with several arguments take JSON instead:
+
+` + "```edit" + `
+{"filePath": "src/main.go", "oldString": "a - b", "newString": "a + b"}
 ` + "```" + `
 
 Rules:
-1. One JSON object per block. Emit several blocks to call several tools at once.
-2. The JSON must be valid — double quotes, no trailing commas, no comments.
-3. When you call tools, output ONLY tool_call blocks (a one-line note before them is fine). Do NOT guess results. Stop and wait — results arrive in the next message.
-4. Never invent file contents, paths, or command output. If you have not read it via a tool, you do not know it.
-5. Before editing, read the file. Before claiming something works, run it or its tests.
-6. When the task is complete, answer in plain prose with NO tool_call block. That signals you are done.
-7. Think through the problem carefully before acting; prefer a few precise tool calls over many speculative ones.
-8. Resuming work ("continue", "where we left off", "pick up the migration"): FIRST call tools — git status, git log -20, read AGENTS.md / TODO* / NOTES* / docs plans, todoread — and only then act. Chat history, Teams, mail and "records" are not sources of truth for repo state; the repo is.
-9. If a todowrite/todoread tool is available: on any task with 3+ steps, write the plan to it first, mark each item in_progress/completed as you go, and never leave it stale. The developer watches that list.
+1. One block per command. Several blocks = several commands at once.
+2. When you write blocks, write ONLY blocks (one short line before them is fine). Then STOP — the output arrives in the next message. Never invent output.
+3. Do not ask the developer to run anything or paste anything. Do not say you "cannot access" the repository — you were never asked to; write the block and the runner will.
+4. Read before editing; run the build/tests before claiming success.
+5. When the task is DONE, answer in plain prose with NO fenced command blocks (use inline code instead). A fenced bash block in a reply means "run this now".
+6. Think briefly before acting; a few precise commands beat many speculative ones.
+7. Resuming ("continue", "where we left off"): FIRST write bash blocks for git status and git log -20, read AGENTS.md / TODO / NOTES / plan docs, then continue. Chat history, Teams, mail and "records" are never the source of truth for repo state.
+8. If a todowrite/todoread runner command exists: on any task with 3+ steps, write the plan to it first and keep it updated.
 
-## Available tools
+## Runner commands available (tag = name; body = the argument named first, or JSON for several)
 `
 
 const (
@@ -99,6 +108,9 @@ func clip(s string, n int) string {
 func renderToolFull(t oaiTool, descMax int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "### %s\n%s\n", t.Function.Name, clip(t.Function.Description, descMax))
+	if pa := primaryArg(t.Function.Parameters); pa != "" {
+		fmt.Fprintf(&sb, "Block body = %q. ", pa)
+	}
 	if len(t.Function.Parameters) > 0 {
 		fmt.Fprintf(&sb, "Parameters (JSON Schema): %s\n", compactJSON(t.Function.Parameters))
 	}
@@ -142,6 +154,73 @@ func renderToolCatalog(tools []oaiTool) string {
 	return sb.String()
 }
 
+// primaryArg picks the argument a bare fenced body maps to: the first
+// required property, else the first property. "" if the tool takes none.
+func primaryArg(params json.RawMessage) string {
+	var sc struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(params, &sc) != nil {
+		return ""
+	}
+	if len(sc.Required) > 0 {
+		return sc.Required[0]
+	}
+	for _, pref := range []string{"command", "filePath", "path", "pattern", "query", "content", "text"} {
+		if _, ok := sc.Properties[pref]; ok {
+			return pref
+		}
+	}
+	return ""
+}
+
+// fence aliases: what models write → what OpenCode calls it.
+var fenceAlias = map[string]string{"sh": "bash", "shell": "bash", "zsh": "bash", "console": "bash", "terminal": "bash", "cat": "read", "file": "read", "search": "grep", "rg": "grep", "find": "glob", "ls": "list"}
+
+var taggedFence = regexp.MustCompile("(?s)```[ \\t]*([A-Za-z][A-Za-z0-9_\\-.]*)[ \\t]*\\n(.*?)\\n?[ \\t]*```")
+
+// extractTaggedCalls: ```<tool>\nbody``` → call. Body that is a JSON object
+// becomes the arguments; otherwise it becomes the tool's primary argument.
+func extractTaggedCalls(text string, known map[string]bool, primary map[string]string) (prose string, calls []parsedCall) {
+	prose = text
+	for _, m := range taggedFence.FindAllStringSubmatch(text, -1) {
+		tag := strings.ToLower(m[1])
+		if a, ok := fenceAlias[tag]; ok {
+			tag = a
+		}
+		name := ""
+		if known[tag] {
+			name = tag
+		} else if r := resolveToolName(tag, known); r != "" && strings.EqualFold(squash(r), squash(tag)) {
+			name = r
+		}
+		if name == "" {
+			continue // ordinary code block (go, json, python …)
+		}
+		body := strings.TrimSpace(m[2])
+		body = strings.TrimPrefix(body, "$ ")
+		var args json.RawMessage
+		if strings.HasPrefix(body, "{") {
+			if fixed, ok := repairJSON(body); ok {
+				args = fixed
+			}
+		}
+		if args == nil {
+			pa := primary[name]
+			if pa == "" {
+				args = json.RawMessage("{}")
+			} else {
+				b, _ := json.Marshal(map[string]string{pa: body})
+				args = b
+			}
+		}
+		calls = append(calls, parsedCall{Name: name, Args: args})
+		prose = strings.Replace(prose, m[0], "", 1)
+	}
+	return strings.TrimSpace(prose), calls
+}
+
 // renderToolReminder is the per-turn "standing orders" on a reused
 // conversation. Field-tested: Copilot's server-side persona reasserts over
 // turns and it forgets where it is, so every turn restates who it is, the
@@ -156,12 +235,12 @@ func renderToolReminder(tools []oaiTool, root, userMsg string) string {
 	if root != "" {
 		sb.WriteString("Working directory (the repo): " + root + " — never ask for a path or branch; look with git status / ls / read.\n")
 	}
-	sb.WriteString("To act, emit ```tool_call fenced JSON: {\"name\": \"<tool>\", \"arguments\": {...}} — one object per block, several blocks for several calls, then STOP and wait for results. Never narrate what you would do; do it. Never ask the developer for files, paths or output you can fetch. Plain prose (no tool_call) only when the task is DONE. Begin with a brief <thinking>…</thinking>.\n")
+	sb.WriteString("You do not run anything yourself (no built-in code execution / sandbox). To act, write fenced blocks tagged with the runner command name, body = argument, e.g. ```bash\ngit status\n``` or ```read\npath/to/file\n``` (JSON body for several arguments). Then STOP; the output comes back next message. Never ask the developer to run or paste anything. Plain prose with no fenced command blocks only when the task is DONE. Begin with a brief <thinking>…</thinking>.\n")
 	names := make([]string, 0, len(g.core))
 	for _, t := range g.core {
 		names = append(names, t.Function.Name)
 	}
-	sb.WriteString("Core tools: " + strings.Join(names, ", ") + "\n")
+	sb.WriteString("Runner commands: " + strings.Join(names, ", ") + "\n")
 	if len(g.order) > 0 {
 		sb.WriteString("MCP servers (tools are named <server>_<tool>; full list was given at the start of this conversation):\n")
 		for _, srv := range g.order {

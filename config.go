@@ -27,6 +27,7 @@ type Config struct {
 	RepoRoot       string // force the repo-map root; else parsed from the system prompt
 	RepoMap        bool   // inject the repo map context (default on)
 	Enforce        bool   // re-prompt once when Copilot refuses to use tools (default on)
+	SynthShell     bool   // turn a command in Copilot's prose into a real shell tool call (default off: that prose can carry injected text from mail/docs)
 	DebugDir       string // if set, dump every prompt/reply pair here as JSON
 	DebugRaw       bool   // DEBUG_RAW=1 keeps dumps un-redacted (local use only)
 	ToolResultMax  int    // bytes of one tool result kept verbatim (head+tail beyond)
@@ -89,6 +90,7 @@ func loadConfig() Config {
 		RepoRoot:       os.Getenv("REPO_ROOT"),
 		RepoMap:        env("REPO_MAP", "on") != "off",
 		Enforce:        env("ENFORCE_TOOLS", "on") != "off",
+		SynthShell:     env("SYNTH_SHELL", "off") == "on",
 		DebugDir:       os.Getenv("DEBUG_DIR"),
 		DebugRaw:       os.Getenv("DEBUG_RAW") == "1",
 		ToolResultMax:  envInt("MAX_TOOL_RESULT", defaultToolResultBudget),

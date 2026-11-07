@@ -70,6 +70,9 @@ later turns carry a names-only reminder.
 - **Protocol enforcement** — if tools were offered and Copilot answers "I
   can't access your files…" or narrates instead of acting, the proxy re-prompts
   once on the same conversation. `ENFORCE_TOOLS=off` to disable.
+- **Command synthesis (off by default)** — `SYNTH_SHELL=on` turns a command
+  Copilot tells you to run into a real shell tool call. It's off because that
+  text can come from mail or docs Copilot read, i.e. someone else's words.
 - **Argument repair + validation** — trailing commas, single quotes, raw
   newlines, prose-wrapped JSON all get fixed; missing/unknown arguments (per
   the tool's schema) trigger one precise re-prompt ("missing required

@@ -355,7 +355,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if len(calls) == 0 && len(problems) == 0 && toolsOffered {
+	if len(calls) == 0 && len(problems) == 0 && toolsOffered && s.cfg.SynthShell {
 		if sh := shellToolName(known); sh != "" {
 			if cmd := extractShellCommand(text); cmd != "" {
 				// It told the developer to run a command: run it for them.
